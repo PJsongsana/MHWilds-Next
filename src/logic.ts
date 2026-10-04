@@ -20,15 +20,16 @@ export interface Monster {
   enraged?: boolean; enrageRemainSec?: number | null; wounds?: number | null;
   parts: Part[]; ailments: Ailment[]; hitzones: Hitzone[]; scars: Scar[];
 }
-export interface Buff { id: string; name: string; remainSec: number | null }
-export interface Member { name: string; self?: boolean; damage: number }
+export interface Buff { id: string; name: string; remainSec: number | null; kind?: 'mantle' | 'song' }
+export interface Member { name: string; self?: boolean; damage: number; hits?: number; crits?: number; weakHits?: number }
+export interface Vitals { hp?: number; hpMax?: number; hpRed?: number; stamina?: number; staminaMax?: number }
 export interface Snapshot {
   v: number; ts: number; connected: boolean; error?: string;
   quest?: { name?: string | null; elapsedSec: number; limitSec: number; remainSec?: number | null; active: boolean };
   world?: { clock: string; phase: Phase } | null;
   targetId?: string | null;
   monsters: Monster[];
-  player: { buffs: Buff[]; weapon?: string | null };
+  player: { buffs: Buff[]; weapon?: string | null; vitals?: Vitals | null };
   party: Member[];
 }
 
@@ -41,7 +42,7 @@ export function normalize(raw: any): Snapshot {
     monsters: arr<any>(raw?.monsters).map((m) => ({
       ...m, parts: arr(m.parts), ailments: arr(m.ailments), hitzones: arr(m.hitzones), scars: arr(m.scars),
     })),
-    player: { buffs: arr(raw?.player?.buffs), weapon: raw?.player?.weapon ?? null },
+    player: { buffs: arr(raw?.player?.buffs), weapon: raw?.player?.weapon ?? null, vitals: raw?.player?.vitals ?? null },
     party: arr(raw?.party),
   };
 }
@@ -91,9 +92,51 @@ export function partyViews(party: Member[], elapsedSec: number) {
   const total = party.reduce((s, m) => s + Math.max(0, m.damage), 0);
   const members = [...party]
     .sort((a, b) => Number(!!b.self) - Number(!!a.self) || b.damage - a.damage)
-    .slice(0, 4)
-    .map((m) => ({ ...m, pct: party.length === 1 ? 100 : pct(m.damage, total) }));
+    .slice(0, 5) // 4 hunters + an NPC support hunter (a recording showed 5)
+    .map((m) => ({
+      ...m,
+      pct: party.length === 1 ? 100 : pct(m.damage, total),
+      dps: elapsedSec > 0 ? m.damage / elapsedSec : 0,
+      critPct: m.hits ? pct(m.crits ?? 0, m.hits) : null, // null = old reader without hit counts
+      weakPct: m.hits ? pct(m.weakHits ?? 0, m.hits) : null,
+    }));
   return { members, total, dps: elapsedSec > 0 ? total / elapsedSec : 0 };
+}
+
+/* ------------------------------ DPS over time ------------------------------ */
+
+export interface DamageSample { t: number; team: number; self: number } // t = quest elapsed sec, cumulative damage
+
+/** Rolling DPS (team and self) over the last `window` seconds, one point per sample. */
+export function dpsSeries(samples: DamageSample[], window = 15) {
+  const out: { t: number; team: number; self: number }[] = [];
+  let j = 0;
+  for (let i = 0; i < samples.length; i++) {
+    while (samples[i].t - samples[j].t > window) j++;
+    const dt = samples[i].t - samples[j].t;
+    out.push(dt > 0
+      ? { t: samples[i].t, team: (samples[i].team - samples[j].team) / dt, self: (samples[i].self - samples[j].self) / dt }
+      : { t: samples[i].t, team: 0, self: 0 });
+  }
+  return out;
+}
+
+/* ------------------------------ post-quest summary ------------------------------ */
+
+/** Everything the summary screen shows, from the last snapshot taken while the quest was active. */
+export function questSummary(s: Snapshot) {
+  const elapsed = s.quest?.elapsedSec ?? 0;
+  const procs = new Map<string, number>();
+  for (const m of s.monsters) for (const a of m.ailments) if (a.procs > 0) procs.set(a.id, (procs.get(a.id) ?? 0) + a.procs);
+  return {
+    elapsed,
+    monsters: s.monsters.map((m) => ({
+      name: m.name, done: hpState(m) === 'done', hpPct: pct(m.hp, m.hpMax),
+      broken: m.parts.filter((p) => p.broken).length, parts: m.parts.length,
+    })),
+    procs: [...procs].map(([id, n]) => ({ id, n })).sort((a, b) => b.n - a.n),
+    party: partyViews(s.party, elapsed),
+  };
 }
 
 /* ------------------------------ hitzones / weak spots ------------------------------ */

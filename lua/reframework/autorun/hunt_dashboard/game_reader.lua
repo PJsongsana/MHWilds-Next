@@ -84,10 +84,14 @@ function(args)
         local key = addr(hunter)
         local rec = damage[key]
         if not rec then
-            rec = { name = safe(hunterName, hunter) or "Hunter", self = hunter:get_IsMaster(), damage = 0 }
+            rec = { name = safe(hunterName, hunter) or "Hunter", self = hunter:get_IsMaster(), damage = 0, hits = 0, crits = 0, weakHits = 0 }
             damage[key] = rec
         end
         rec.damage = rec.damage + final
+        rec.hits = rec.hits + 1
+        -- crit / weak-spot flags: same fields Overlay data.lua HandleHitData reads (CriticalType: 1 = Critical)
+        if try("crit", function() return hit:get_AttackData()._CriticaType end) == 1 then rec.crits = rec.crits + 1 end
+        if try("weakHit", function() return dmg.IsHitWeakPoint_Parts or dmg.IsHitWeakPoint_Scar end) then rec.weakHits = rec.weakHits + 1 end
         if rec.self then selfTarget = addr(ctx) end
     end)
 end)
@@ -304,7 +308,44 @@ local function readBuffs()
             table.insert(out, { id = b.id, name = Core.GetItemName(b.item) or b.id, remainSec = (not infinite) and timer or nil })
         end
     end
+    -- mantles / active skills and hunting-horn songs; each source isolated so one failing keeps the rest
+    try("mantle", function()
+        -- app.mcActiveSkillController._ActiveSkills: get_IsUse / get_Timer (Overlay status/data.lua UpdateASkill)
+        Core.ForEach(hunter:get_ASkillController()._ActiveSkills, function(askill, i)
+            if askill:get_IsUse() then
+                local t = askill:get_Timer()
+                if type(t) == "number" and t > 0 then
+                    table.insert(out, { id = "askill_" .. i, kind = "mantle", name = Core.GetASkillName(i) or ("Mantle " .. i), remainSec = t })
+                end
+            end
+        end)
+    end)
+    try("songs", function()
+        -- cHunterSkill._Wp05MusicSkill._SkillTimer[i] = seconds left of horn song i (Overlay UpdateHunterSkills)
+        Core.ForEach(hunter:get_HunterStatus()._Skill._Wp05MusicSkill._SkillTimer, function(timer, i)
+            if type(timer) == "number" and timer > 0 then
+                table.insert(out, { id = "song_" .. i, kind = "song", name = Core.GetMusicSkillName(i) or ("Song " .. i), remainSec = timer })
+            end
+        end)
+    end)
     return out
+end
+
+-- Our HP (incl. red/recoverable) and stamina — app.cHunterHealth / app.cHunterStamina getters used by Overlay
+local function readVitals()
+    local hunter = Core.GetPlayerCharacter()
+    if not hunter then return nil end
+    local v = {}
+    try("health", function()
+        local h = hunter:get_HunterHealth()
+        local mgr = h:get_HealthMgr()
+        v.hp, v.hpMax, v.hpRed = mgr:get_Health(), mgr:get_MaxHealth(), h:get_RedHealth()
+    end)
+    try("stamina", function()
+        local s = hunter:get_HunterStamina()
+        v.stamina, v.staminaMax = s:get_Stamina(), s:get_MaxStamina()
+    end)
+    return v
 end
 
 ---------------------------------------------------------------------------
@@ -352,9 +393,10 @@ function M.snapshot()
     snap.player = {
         buffs = try("buffs", readBuffs) or {},
         weapon = try("weapon", function() return WeaponNames[Core.GetPlayerWeaponType()] end),
+        vitals = readVitals(),
     }
     for _, rec in pairs(damage) do
-        table.insert(snap.party, { name = rec.name, self = rec.self, damage = math.floor(rec.damage) })
+        table.insert(snap.party, { name = rec.name, self = rec.self, damage = math.floor(rec.damage), hits = rec.hits, crits = rec.crits, weakHits = rec.weakHits })
     end
     if next(errors) then snap.errors = errors end
     return snap

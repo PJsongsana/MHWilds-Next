@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import {
   buffViews, callouts, elementRank, hpState, linkState, mmss, normalize, partViews, partyViews, pct, physTypeFor, pickMonster,
-  weakSpots, monsterInfo, elementStars, type Hitzone, type Monster,
+  weakSpots, monsterInfo, elementStars, dpsSeries, questSummary, type Hitzone, type Monster,
 } from './logic';
 
 const hz = (name: string, slash: number, blow: number, shot: number, fire = 0, ice = 0): Hitzone =>
@@ -119,4 +119,30 @@ test('callouts cover other monsters: their capture/enrage show with a name, afte
   const a = mk('a', 'A', 90, true), b = mk('b', 'B', 10, true), dead = mk('c', 'C', 0, true);
   const s = normalize({ v: 1, ts: 0, connected: true, monsters: [a, b, dead] });
   expect(callouts(s, a).map((c) => [c.kind, c.who])).toEqual([['capture', 'B'], ['enrage', undefined], ['enrage', 'B']]);
+});
+
+test('rolling DPS uses only the last window of samples', () => {
+  const s = [0, 5, 10, 15, 20].map((t) => ({ t, team: t * 100, self: t * 40 }));
+  const d = dpsSeries(s, 10);
+  expect(d[0]).toEqual({ t: 0, team: 0, self: 0 });
+  expect(d.at(-1)).toEqual({ t: 20, team: 100, self: 40 });
+});
+
+test('party: crit and weak-hit rates, null without hit counts', () => {
+  const p = partyViews([{ name: 'me', self: true, damage: 100, hits: 8, crits: 2, weakHits: 4 }, { name: 'x', damage: 50 }], 10);
+  expect(p.members.map((m) => [m.critPct, m.weakPct])).toEqual([[25, 50], [null, null]]);
+});
+
+test('quest summary: monsters, summed ailment procs, party', () => {
+  const m = (id: string, hp: number): Monster => ({
+    id, name: id, hp, hpMax: 100, hitzones: [], scars: [],
+    parts: [{ id: 'h', name: 'h', kind: 'head', hp: 0, hpMax: 1, broken: true }, { id: 't', name: 't', kind: 'tail', hp: 1, hpMax: 1, broken: false }],
+    ailments: [{ id: 'paralysis', buildup: 0, procs: 2 }, { id: 'sleep', buildup: 0, procs: 0 }],
+  });
+  const s = normalize({ v: 1, ts: 0, connected: true, quest: { active: true, elapsedSec: 600, limitSec: 3000 },
+    monsters: [m('a', 0), m('b', 30)], party: [{ name: 'me', self: true, damage: 6000 }] });
+  const q = questSummary(s);
+  expect(q.monsters.map((x) => [x.name, x.done, x.broken, x.parts])).toEqual([['a', true, 1, 2], ['b', false, 1, 2]]);
+  expect(q.procs).toEqual([{ id: 'paralysis', n: 4 }]);
+  expect(q.party.dps).toBe(10);
 });

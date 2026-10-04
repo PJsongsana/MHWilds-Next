@@ -1,11 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Icon, iconFor, type IconName } from './icons';
 import {
-  buffViews, callouts, elementRank, elementStars, fmtInt, monsterInfo, hpState, mmss, partViews, partyViews, pct, physTypeFor, physValue, pickMonster, ratio,
-  weakSpots, WEAK_HITZONE,
-  type Ailment, type Callout, type Hitzone, type Link, type Monster, type MonsterInfo, type PartView, type PhysType, type Scar, type Snapshot,
+  buffViews, callouts, dpsSeries, elementRank, elementStars, fmtInt, monsterInfo, hpState, mmss, partViews, partyViews, pct, physTypeFor, physValue,
+  pickMonster, questSummary, ratio, weakSpots, WEAK_HITZONE,
+  type Ailment, type Callout, type DamageSample, type Hitzone, type Link, type Monster, type MonsterInfo, type PartView, type PhysType, type Scar,
+  type Snapshot, type Vitals,
 } from './logic';
 import { mocks } from './mocks';
+import { DEFAULT_SETTINGS, setSettings, useSettings, type PanelKey } from './settings';
 import { t } from './strings';
 import { mockName, useHunt } from './useHunt';
 
@@ -36,11 +38,11 @@ const PARTY_COLORS = ['#5AA9E6', '#8FD3A8', '#B48BE8'];
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ');
 
-function useCanvas() {
+function useCanvas(scale: number) {
   const calc = () => {
     const portrait = innerWidth / innerHeight < PORTRAIT_BELOW;
     const [minW, minH] = portrait ? [880, 1200] : [1280, 860];
-    const zoom = Math.min(innerWidth / minW, innerHeight / minH);
+    const zoom = Math.min(innerWidth / minW, innerHeight / minH) * scale;
     const w = innerWidth / zoom, h = innerHeight / zoom;
     const layout: Layout = portrait ? 'portrait' : w / h >= WIDE_FROM ? 'wide' : 'landscape';
     return { zoom, w, h, layout };
@@ -48,36 +50,84 @@ function useCanvas() {
   const [c, setC] = useState(calc);
   useEffect(() => {
     const fit = () => setC(calc());
+    fit();
     addEventListener('resize', fit);
     return () => removeEventListener('resize', fit);
-  }, []);
+  }, [scale]);
   return c;
 }
 
 export default function App() {
-  const { snap, link } = useHunt();
-  const { zoom, w, h, layout } = useCanvas();
+  const { snap, link, samples, summary } = useHunt();
+  const settings = useSettings();
+  const { zoom, w, h, layout } = useCanvas(settings.scale);
+  const [showSettings, setShowSettings] = useState(false);
   const inQuest = !!snap?.connected && !!snap.quest?.active;
+  const { monster } = snap ? pickMonster(snap) : { monster: null };
+  useAlertSound(inQuest && snap ? callouts(snap, monster) : [], settings.sound);
+
+  // S opens settings, Esc closes (spec §10: keyboard usable, nothing needed while playing)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setShowSettings(false);
+      else if (e.key.toLowerCase() === 's' && !(e.target instanceof HTMLInputElement)) setShowSettings((v) => !v);
+    };
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  }, []);
 
   return (
     <div className="h-full overflow-hidden">
       <div style={{ zoom, width: w, height: h }} className="flex flex-col gap-4 px-6 py-5 tabular-nums">
-        <Header snap={snap} link={link} />
+        <Header snap={snap} link={link} onSettings={() => setShowSettings(true)} />
         {link === 'connecting' ? (
           <Center icon="clock" title={t.waitingBridge} sub={t.waitingBridgeHint} />
         ) : link === 'offline' ? (
           <Center icon="clock" title={t.waitingGame} sub={snap?.error} />
         ) : !inQuest ? (
-          <Center icon="target" title={t.notInQuest} />
+          summary ? <SummaryView snap={summary.snap} samples={summary.samples} /> : <Center icon="target" title={t.notInQuest} />
         ) : (
           <div className={cx('flex min-h-0 flex-1 flex-col gap-4 transition-opacity', link === 'stale' && 'opacity-50')}>
-            <Dashboard snap={snap!} layout={layout} />
+            <Dashboard snap={snap!} layout={layout} samples={samples} />
           </div>
         )}
       </div>
+      {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
       {mockName && <MockSwitcher />}
     </div>
   );
+}
+
+/* ---------------------------------- sound ----------------------------------- */
+
+// Short tones when something you should act on *appears*: capture, a monster disabled, enrage.
+// Generated with Web Audio (no sound files). Browsers allow it only after a click, which the settings toggle provides.
+let audio: AudioContext | null = null;
+export function beep(freqs: number[]) {
+  audio ??= new AudioContext();
+  const ctx = audio;
+  freqs.forEach((f, i) => {
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    const at = ctx.currentTime + i * 0.14;
+    o.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(0.18, at + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.22);
+    o.connect(g).connect(ctx.destination);
+    o.start(at);
+    o.stop(at + 0.25);
+  });
+}
+const TONES: Partial<Record<Callout['kind'], number[]>> = { capture: [880, 1175], ailment: [660, 880], enrage: [440, 330] };
+
+function useAlertSound(items: Callout[], on: boolean) {
+  const seen = useRef(new Set<string>());
+  useEffect(() => {
+    const keys = new Set(items.filter((c) => TONES[c.kind]).map((c) => `${c.kind}:${'id' in c ? c.id : ''}:${c.who ?? ''}`));
+    const fresh = [...keys].find((k) => !seen.current.has(k));
+    seen.current = keys;
+    if (on && fresh) beep(TONES[fresh.split(':')[0] as Callout['kind']]!);
+  });
 }
 
 /**
@@ -88,7 +138,8 @@ export default function App() {
  * Finished monsters (dead/captured) collapse into one slim "done" row so the live ones get the space;
  * when only one is still alive it goes back to the full single-monster layout.
  */
-function Dashboard({ snap, layout }: { snap: Snapshot; layout: Layout }) {
+function Dashboard({ snap, layout, samples }: { snap: Snapshot; layout: Layout; samples: DamageSample[] }) {
+  const { panels } = useSettings();
   const phys = physTypeFor(snap.player.weapon);
   const all = snap.monsters.slice(0, 3);
   const alive = all.filter((m) => hpState(m) !== 'done');
@@ -97,28 +148,31 @@ function Dashboard({ snap, layout }: { snap: Snapshot; layout: Layout }) {
   const monster = shown.find((m) => m.id === pickMonster(snap).monster?.id) ?? shown[0] ?? null;
   const multi = shown.length > 1;
   const done = finished.length > 0 && <DoneRow monsters={finished} />;
+  const now = panels.now && <NowPanel items={callouts(snap, monster)} cols={layout === 'portrait' ? 2 : 4} done={done} />;
 
   if (layout === 'portrait') {
     return (
       <>
-        <NowPanel items={callouts(snap, monster)} cols={2} done={done} />
+        {now}
         <div className="flex min-h-0 flex-1 flex-col gap-4">
           {shown.length === 0 && <MonsterCard monster={null} phys={phys} ringZoom={1} />}
           {shown.map((m) => (
             <MonsterPane key={m.id} m={m} phys={phys} selected={multi && m.id === monster?.id} ringZoom={multi ? 0.55 : 0.8} fitContent />
           ))}
         </div>
-        <PlayerRow snap={snap} fitContent />
+        <PlayerBlock snap={snap} samples={samples} direction="row" fitContent />
       </>
     );
   }
 
   const wide = layout === 'wide';
+  // single monster: card + optional parts / ailments columns (settings can hide either)
+  const cols = ['440px', panels.parts && 'minmax(0,1fr)', panels.ailments && (panels.parts ? '360px' : 'minmax(0,1fr)')].filter(Boolean).join(' ');
   const monsters = !multi ? (
-    <div className="grid min-h-0 flex-1 grid-cols-[440px_minmax(0,1fr)_360px] gap-4">
-      <MonsterCard monster={monster} phys={phys} ringZoom={wide ? 0.9 : 0.7} />
-      <PartsPanel monster={monster} phys={phys} />
-      <AilmentsPanel ailments={monster?.ailments ?? []} />
+    <div className="grid min-h-0 flex-1 gap-4" style={{ gridTemplateColumns: cols }}>
+      <MonsterCard monster={monster} phys={phys} ringZoom={wide ? 0.9 : 0.66} />
+      {panels.parts && <PartsPanel monster={monster} phys={phys} />}
+      {panels.ailments && <AilmentsPanel ailments={monster?.ailments ?? []} />}
     </div>
   ) : (
     <div className="grid min-h-0 flex-1 gap-4" style={{ gridTemplateColumns: `repeat(${shown.length}, minmax(0, 1fr))` }}>
@@ -127,16 +181,16 @@ function Dashboard({ snap, layout }: { snap: Snapshot; layout: Layout }) {
   );
   return (
     <>
-      <NowPanel items={callouts(snap, monster)} done={done} />
+      {now}
       {wide ? (
         <div className="flex min-h-0 flex-1 gap-4">
           <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">{monsters}</div>
-          <PlayerColumn snap={snap} />
+          <PlayerBlock snap={snap} samples={samples} direction="column" />
         </div>
       ) : (
         <>
           {monsters}
-          <PlayerRow snap={snap} />
+          <PlayerBlock snap={snap} samples={samples} direction="row" />
         </>
       )}
     </>
@@ -166,20 +220,19 @@ function DoneRow({ monsters }: { monsters: Monster[] }) {
 
 /* ---------------------------------- player ---------------------------------- */
 
-function PlayerRow({ snap, fitContent }: { snap: Snapshot; fitContent?: boolean }) {
+// "Us" block: our buffs/vitals + team damage. Bottom row (landscape/portrait) or right column (wide).
+function PlayerBlock({ snap, samples, direction, fitContent }: { snap: Snapshot; samples: DamageSample[]; direction: 'row' | 'column'; fitContent?: boolean }) {
+  const { panels } = useSettings();
+  if (!panels.buffs && !panels.damage) return null;
+  const buffs = panels.buffs && <BuffsPanel snap={snap} />;
+  const damage = panels.damage && <DamageMeter {...partyViews(snap.party, snap.quest?.elapsedSec ?? 0)} samples={samples} />;
+  if (direction === 'column') {
+    return <div className="flex min-h-0 w-[360px] shrink-0 flex-col gap-4">{buffs}{damage}</div>;
+  }
+  const both = panels.buffs && panels.damage;
   return (
-    <div className={cx('grid shrink-0 grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] gap-4', fitContent ? 'items-start' : 'h-[178px]')}>
-      <BuffsPanel snap={snap} />
-      <DamageMeter {...partyViews(snap.party, snap.quest?.elapsedSec ?? 0)} />
-    </div>
-  );
-}
-
-function PlayerColumn({ snap }: { snap: Snapshot }) {
-  return (
-    <div className="flex min-h-0 w-[360px] shrink-0 flex-col gap-4">
-      <BuffsPanel snap={snap} />
-      <DamageMeter {...partyViews(snap.party, snap.quest?.elapsedSec ?? 0)} />
+    <div className={cx('grid shrink-0 gap-4', both ? 'grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]' : 'grid-cols-1', fitContent ? 'items-start' : 'h-[190px]')}>
+      {buffs}{damage}
     </div>
   );
 }
@@ -237,11 +290,11 @@ function Center({ icon, title, sub }: { icon: IconName; title: string; sub?: str
 
 const LINK_DOT: Record<Link, string> = { live: 'bg-ok shadow-[0_0_8px_#5BC489]', stale: 'bg-accent', offline: 'bg-disabled', connecting: 'bg-disabled' };
 
-function Header({ snap, link }: { snap: Snapshot | null; link: Link }) {
+function Header({ snap, link, onSettings }: { snap: Snapshot | null; link: Link; onSettings: () => void }) {
   const q = snap?.connected ? snap.quest : undefined;
   const world = snap?.connected ? snap.world : null;
   return (
-    <header className="flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-x-6 gap-y-3">
+    <header className="app-drag flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-x-6 gap-y-3">
       <div className="flex min-w-0 items-center gap-4">
         <div className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-gold-hi/40 bg-linear-to-br from-gold-hi to-gold text-on-accent shadow-[0_0_16px_rgb(200_169_106/0.3)]">
           <Icon name="claw" size={26} stroke={2.2} />
@@ -274,6 +327,10 @@ function Header({ snap, link }: { snap: Snapshot | null; link: Link }) {
           <span className={cx('size-2.5 rounded-full', LINK_DOT[link])} />
           <span className={cx('text-[15px]', link === 'stale' ? 'text-accent' : 'text-ink-2')}>{t.link[link]}</span>
         </Chip>
+        <button type="button" onClick={onSettings} title={t.settings.open} aria-label={t.settings.open} data-nodrag
+          className="flex size-12 items-center justify-center rounded-xl border border-line bg-surface/90 text-muted hover:border-gold hover:text-gold-hi focus-visible:outline-2 focus-visible:outline-gold">
+          <Icon name="gear" size={22} stroke={1.8} />
+        </button>
       </div>
     </header>
   );
@@ -288,6 +345,7 @@ function Chip({ className, children }: { className?: string; children: ReactNode
 // Everything about one monster in one frame, used when the quest has 2–3 monsters side by side.
 // The one you hit last gets a gold frame.
 function MonsterPane({ m, phys, selected, ringZoom, fitContent }: { m: Monster; phys: PhysType | null; selected: boolean; ringZoom: number; fitContent?: boolean }) {
+  const { panels } = useSettings();
   const state = hpState(m);
   const done = state === 'done';
   const info = monsterInfo(m);
@@ -321,10 +379,12 @@ function MonsterPane({ m, phys, selected, ringZoom, fitContent }: { m: Monster; 
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-2 gap-3">
-        <PartsPanel monster={m} phys={phys} bare />
-        <AilmentsPanel ailments={m.ailments} bare />
-      </div>
+      {(panels.parts || panels.ailments) && (
+        <div className={cx('grid min-h-0 flex-1 gap-3', panels.parts && panels.ailments ? 'grid-cols-2' : 'grid-cols-1')}>
+          {panels.parts && <PartsPanel monster={m} phys={phys} bare />}
+          {panels.ailments && <AilmentsPanel ailments={m.ailments} bare />}
+        </div>
+      )}
     </Panel>
   );
 }
@@ -697,17 +757,20 @@ const BUFF_STYLE = {
 
 function BuffsPanel({ snap }: { snap: Snapshot }) {
   const buffs = buffViews(snap.player.buffs);
+  const v = snap.player.vitals;
   return (
     <Panel className="flex min-h-0 flex-1 flex-col gap-2 px-5 py-3.5">
       <Eyebrow icon="shield">{t.buffsTitle}</Eyebrow>
+      {v && (v.hpMax || v.staminaMax) ? <VitalsBars v={v} /> : null}
       {buffs.length === 0 && <div className="text-[15px] text-muted">{t.noBuffs}</div>}
       <div className="grid min-h-0 grid-cols-[repeat(auto-fill,minmax(180px,1fr))] content-start gap-2 overflow-y-auto">
         {buffs.map((b) => {
           const s = BUFF_STYLE[b.variant];
+          const icon: IconName = b.kind === 'song' ? 'note' : b.kind === 'mantle' ? 'shield' : iconFor(b.id, 'flask');
           return (
             // one line: icon · name · time — four fit in two rows of the bottom player block
             <div key={b.id} className={cx('flex h-11 min-w-0 items-center gap-2.5 rounded-xl border px-3', s.card)}>
-              <Icon name={iconFor(b.id, 'flask')} size={18} className={cx('shrink-0', s.icon)} />
+              <Icon name={icon} size={18} className={cx('shrink-0', s.icon)} />
               <span className="min-w-0 flex-1 truncate text-sm text-ink-2">{b.name}</span>
               <span className={cx('shrink-0 text-[22px] leading-none font-bold', s.time)}>{b.remainSec == null ? '∞' : mmss(b.remainSec)}</span>
             </div>
@@ -718,26 +781,53 @@ function BuffsPanel({ snap }: { snap: Snapshot }) {
   );
 }
 
+// Our HP (green, red part = recoverable) and stamina (yellow) as two thin bars.
+function VitalsBars({ v }: { v: Vitals }) {
+  const hp = ratio(v.hp ?? 0, v.hpMax ?? 0), red = ratio((v.hp ?? 0) + (v.hpRed ?? 0), v.hpMax ?? 0);
+  return (
+    <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1.5 text-[13px]">
+      {v.hpMax ? <>
+        <span className="text-muted">{t.vitals.hp}</span>
+        <div className="relative h-2.5 overflow-hidden rounded-full bg-track">
+          <div className="absolute inset-y-0 left-0 rounded-full bg-danger/50" style={{ width: `${red * 100}%` }} />
+          <div className="absolute inset-y-0 left-0 rounded-full bg-ok transition-[width] duration-250" style={{ width: `${hp * 100}%` }} />
+        </div>
+        <span className="font-semibold text-ink">{Math.round(v.hp ?? 0)}</span>
+      </> : null}
+      {v.staminaMax ? <>
+        <span className="text-muted">{t.vitals.stamina}</span>
+        <Bar value={ratio(v.stamina ?? 0, v.staminaMax)} color="#E6C84A" h={8} />
+        <span className="font-semibold text-ink">{Math.round(v.stamina ?? 0)}</span>
+      </> : null}
+    </div>
+  );
+}
+
 /* ------------------------------- damage meter ------------------------------- */
 
-function DamageMeter({ members, dps }: ReturnType<typeof partyViews>) {
+function DamageMeter({ members, dps, samples }: ReturnType<typeof partyViews> & { samples?: DamageSample[] }) {
   let other = 0;
   return (
-    // one row per hunter: name | bar | damage · %  (fits both the bottom row and the right column)
+    // one row per hunter: name | bar | damage · % | crit  (fits both the bottom row and the right column)
     <Panel className="flex min-h-0 flex-1 flex-col gap-2 px-5 py-3.5">
       <Eyebrow icon="sword" right={<span className="shrink-0 text-[15px] text-ink-2">DPS <b className="text-ink">{dps.toFixed(1)}</b></span>}>{t.damageTitle}</Eyebrow>
       {members.length === 0 && <div className="text-[15px] text-muted">{t.noDamage}</div>}
-      <div className="flex min-h-0 flex-col justify-center gap-1.5 overflow-y-auto">
+      <div className="relative flex min-h-0 flex-1 flex-col justify-center gap-1.5 overflow-y-auto">
+        {/* DPS trend sits faintly behind the rows so it costs no height */}
+        {samples && samples.length > 2 && (
+          <div className="pointer-events-none absolute inset-0 opacity-35"><DpsChart samples={samples} height={0} fill /></div>
+        )}
         {members.map((m, i) => {
           const color = m.self ? '#F2A541' : PARTY_COLORS[other++ % PARTY_COLORS.length];
           return (
-            <div key={`${m.name}-${i}`} className="grid grid-cols-[minmax(0,110px)_minmax(0,1fr)_auto] items-center gap-3">
+            <div key={`${m.name}-${i}`} className="grid grid-cols-[minmax(0,100px)_minmax(0,1fr)_auto_auto] items-center gap-3">
               <div className="flex min-w-0 items-center gap-2">
                 <span className="size-2.5 shrink-0 rounded-full" style={{ background: color }} />
                 <span className={cx('truncate text-[15px] font-semibold', m.self && 'text-accent')}>{m.name}</span>
               </div>
               <Bar value={m.pct / 100} color={color} h={8} />
               <span className="text-right text-sm text-muted">{fmtInt(m.damage)} · <b className="text-ink">{m.pct}%</b></span>
+              <span className="w-14 text-right text-xs text-muted" title={t.critTitle}>{m.critPct != null ? `${t.crit} ${m.critPct}%` : ''}</span>
             </div>
           );
         })}
@@ -746,10 +836,133 @@ function DamageMeter({ members, dps }: ReturnType<typeof partyViews>) {
   );
 }
 
+// Rolling 15s DPS over the quest: team (blue area) and you (orange line).
+function DpsChart({ samples, height, fill }: { samples: DamageSample[]; height: number; fill?: boolean }) {
+  const pts = dpsSeries(samples);
+  const W = 600, H = fill ? 100 : height;
+  const tMax = pts.at(-1)?.t || 1;
+  const yMax = Math.max(1, ...pts.map((p) => p.team));
+  const x = (v: number) => (v / tMax) * W;
+  const y = (v: number) => H - (v / yMax) * (H - 2);
+  const line = (k: 'team' | 'self') => pts.map((p, i) => `${i ? 'L' : 'M'}${x(p.t).toFixed(1)},${y(p[k]).toFixed(1)}`).join(' ');
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className={cx('w-full shrink-0', fill && 'h-full')}
+      style={fill ? undefined : { height }} aria-label={t.dpsChart}>
+      <path d={`${line('team')} L${W},${H} L0,${H} Z`} fill="rgb(90 169 230 / 0.18)" />
+      <path d={line('team')} fill="none" stroke="#5AA9E6" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+      <path d={line('self')} fill="none" stroke="#F2A541" strokeWidth="1.8" vectorEffect="non-scaling-stroke" />
+    </svg>
+  );
+}
+
+/* ------------------------------ post-quest summary ------------------------------ */
+
+function SummaryView({ snap, samples }: { snap: Snapshot; samples: DamageSample[] }) {
+  const s = questSummary(snap);
+  let other = 0;
+  return (
+    <Panel className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-8 py-6">
+      <div className="flex items-baseline justify-between gap-4">
+        <Eyebrow icon="check">{t.summary.title}</Eyebrow>
+        <span className="shrink-0 text-[15px] text-muted">{t.summary.time} <b className="text-2xl text-ink">{mmss(s.elapsed)}</b></span>
+      </div>
+      <div className="flex flex-wrap gap-3">
+        {s.monsters.map((m) => (
+          <div key={m.name} className="flex min-w-60 flex-1 items-center gap-3 rounded-xl border border-line bg-surface-2 px-4 py-3">
+            <Icon name={m.done ? 'check' : 'claw'} size={22} className={m.done ? 'text-ok' : 'text-muted'} />
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-display text-lg font-semibold">{m.name}</div>
+              <div className="text-[13px] text-muted">{m.done ? t.done : t.summary.hpLeft(m.hpPct)} · {t.breaks} {m.broken}/{m.parts}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+      {s.procs.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-[15px]">
+          <span className="text-muted">{t.summary.procs}</span>
+          {s.procs.map((p) => {
+            const [color, bg] = ailColors(p.id);
+            return <span key={p.id} className="rounded-lg px-2.5 py-1 font-semibold" style={{ color, background: bg }}>{t.ailment[p.id] ?? p.id} ×{p.n}</span>;
+          })}
+        </div>
+      )}
+      {samples.length > 2 && <DpsChart samples={samples} height={110} />}
+      <div className="grid grid-cols-[minmax(0,1.4fr)_repeat(4,minmax(0,1fr))] gap-x-4 gap-y-2.5 text-[15px]">
+        {[t.summary.hunter, t.summary.damage, 'DPS', t.crit, t.summary.weak].map((h) => <span key={h} className="text-[13px] text-muted">{h}</span>)}
+        {s.party.members.map((m, i) => {
+          const color = m.self ? '#F2A541' : PARTY_COLORS[other++ % PARTY_COLORS.length];
+          return [
+            <span key={`n${i}`} className={cx('flex min-w-0 items-center gap-2 font-semibold', m.self && 'text-accent')}>
+              <span className="size-2.5 shrink-0 rounded-full" style={{ background: color }} /><span className="truncate">{m.name}</span>
+            </span>,
+            <span key={`d${i}`}>{fmtInt(m.damage)} <span className="text-muted">({m.pct}%)</span></span>,
+            <span key={`p${i}`}>{m.dps.toFixed(1)}</span>,
+            <span key={`c${i}`}>{m.critPct != null ? `${m.critPct}%` : '—'}</span>,
+            <span key={`w${i}`}>{m.weakPct != null ? `${m.weakPct}%` : '—'}</span>,
+          ];
+        })}
+      </div>
+    </Panel>
+  );
+}
+
+/* --------------------------------- settings --------------------------------- */
+
+const PANEL_KEYS: PanelKey[] = ['now', 'parts', 'ailments', 'buffs', 'damage'];
+
+// Opened with the gear button or S; every control is a native input, so it works with the keyboard.
+function SettingsDialog({ onClose }: { onClose: () => void }) {
+  const s = useSettings();
+  const first = useRef<HTMLInputElement>(null);
+  useEffect(() => { first.current?.focus(); }, []);
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
+      <div role="dialog" aria-modal="true" aria-label={t.settings.title} onClick={(e) => e.stopPropagation()}
+        className="wilds-panel flex w-full max-w-md flex-col gap-5 p-6 text-[15px]">
+        <Eyebrow icon="gear">{t.settings.title}</Eyebrow>
+        <label className="flex items-center justify-between gap-4">
+          <span>{t.settings.port}</span>
+          <input ref={first} type="number" min={1024} max={65535} value={s.port}
+            onChange={(e) => { const p = Number(e.target.value); if (p >= 1024 && p <= 65535) setSettings({ port: p }); }}
+            className="w-28 rounded-lg border border-line bg-surface-2 px-3 py-1.5 text-right" />
+        </label>
+        <label className="flex flex-col gap-2">
+          <span className="flex justify-between"><span>{t.settings.scale}</span><b>{Math.round(s.scale * 100)}%</b></span>
+          <input type="range" min={0.7} max={1.5} step={0.05} value={s.scale} onChange={(e) => setSettings({ scale: Number(e.target.value) })}
+            className="accent-gold" />
+        </label>
+        <label className="flex items-center justify-between gap-4">
+          <span>{t.settings.sound}</span>
+          <input type="checkbox" checked={s.sound} className="size-5 accent-gold"
+            onChange={(e) => { setSettings({ sound: e.target.checked }); if (e.target.checked) beep(TONES.capture!); }} />
+        </label>
+        <fieldset className="flex flex-col gap-2">
+          <legend className="mb-1 text-muted">{t.settings.panels}</legend>
+          {PANEL_KEYS.map((k) => (
+            <label key={k} className="flex items-center justify-between gap-4">
+              <span>{t.settings.panel[k]}</span>
+              <input type="checkbox" checked={s.panels[k]} className="size-5 accent-gold"
+                onChange={(e) => setSettings({ panels: { ...s.panels, [k]: e.target.checked } })} />
+            </label>
+          ))}
+        </fieldset>
+        <div className="flex items-center justify-between gap-3">
+          <button type="button" onClick={() => setSettings({ ...DEFAULT_SETTINGS })} className="text-sm text-muted underline hover:text-ink">{t.settings.reset}</button>
+          <button type="button" onClick={onClose}
+            className="rounded-lg border border-gold bg-gold/15 px-5 py-2 font-semibold text-gold-hi hover:bg-gold/25 focus-visible:outline-2 focus-visible:outline-gold">
+            {t.settings.close}
+          </button>
+        </div>
+        <p className="text-xs text-muted">{t.settings.hint}</p>
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------------- dev: mock bar ------------------------------ */
 
 function MockSwitcher() {
-  const names = ['connecting', 'stale', ...Object.keys(mocks)];
+  const names = ['connecting', 'stale', 'summary', ...Object.keys(mocks)];
   return (
     <nav className="fixed top-1 left-1/2 flex -translate-x-1/2 flex-wrap gap-1 rounded-lg border border-line bg-surface/95 p-1.5 text-xs opacity-20 transition-opacity hover:opacity-100">
       {names.map((n) => (

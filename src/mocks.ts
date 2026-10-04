@@ -43,18 +43,20 @@ const base: Snapshot = {
   monsters: [reyDau],
   player: {
     weapon: 'LONG_SWORD',
+    vitals: { hp: 128, hpMax: 150, hpRed: 14, stamina: 92, staminaMax: 150 },
     buffs: [
       { id: 'demondrug', name: 'Demondrug', remainSec: null },
       { id: 'might_seed', name: 'Might Seed', remainSec: 12 },
-      { id: 'mantle', name: 'Mantle', remainSec: 108 },
+      { id: 'askill_3', kind: 'mantle', name: 'Rocksteady Mantle', remainSec: 108 },
+      { id: 'song_2', kind: 'song', name: 'Attack Up (S)', remainSec: 64 },
       { id: 'hot_drink', name: 'Hot Drink', remainSec: 390 },
     ],
   },
   party: [
-    { name: 'คุณ', self: true, damage: 9820 },
-    { name: 'Player 2', damage: 6240 },
-    { name: 'Player 3', damage: 4800 },
-    { name: 'Player 4', damage: 3100 },
+    { name: 'คุณ', self: true, damage: 9820, hits: 212, crits: 71, weakHits: 140 },
+    { name: 'Player 2', damage: 6240, hits: 180, crits: 40, weakHits: 90 },
+    { name: 'Player 3', damage: 4800, hits: 150, crits: 22, weakHits: 60 },
+    { name: 'Player 4', damage: 3100, hits: 90, crits: 9, weakHits: 30 },
   ],
 };
 

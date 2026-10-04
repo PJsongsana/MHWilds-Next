@@ -102,9 +102,6 @@
 }
 
 @layer components {
-  /* Electron frameless window: drag it by the header; buttons stay clickable. Ignored by normal browsers. */
-  .app-drag { -webkit-app-region: drag; }
-  .app-drag button, .app-drag [data-nodrag] { -webkit-app-region: no-drag; }
 
   /* Panel: bronze frame, faint gold inner ring, gold bracket on two opposite corners */
   .wilds-panel {

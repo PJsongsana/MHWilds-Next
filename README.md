@@ -21,6 +21,7 @@ Open the page on the second monitor and press F11 — or run it as a desktop app
 ```bash
 npm run app       # builds the UI, opens a borderless window on the second monitor (bridge included)
 npm run app:dev   # same window, but showing the running dev server
+npm run dist      # package it: release/HuntDashboard-<version>-portable.exe (single file, no install)
 ```
 
 The app window remembers its position, never takes focus from the game, F11 = fullscreen, Alt+F4 closes, drag it by the header.

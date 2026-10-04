@@ -39,3 +39,6 @@ next-env.d.ts
 /dist/
 *.jsonl
 
+
+# electron-builder output
+/release/

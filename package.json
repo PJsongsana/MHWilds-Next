@@ -1,8 +1,12 @@
 {
   "name": "mhwilds-next",
+  "productName": "Hunt Dashboard",
+  "description": "Second-screen hunt dashboard for Monster Hunter Wilds",
+  "author": "PJsongsana",
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "main": "electron/main.mjs",
   "scripts": {
     "dev": "vite",
     "bridge": "node bridge/server.js",
@@ -12,11 +16,31 @@
     "install-lua": "node scripts/install-lua.js",
     "app": "vite build && node scripts/electron.js",
     "app:dev": "node scripts/electron.js --dev",
+    "dist": "tsc && vite build && node scripts/dist.js",
     "fetch-monster-data": "node scripts/fetch-monster-data.js"
   },
+  "build": {
+    "appId": "th.mhwilds.huntdashboard",
+    "productName": "Hunt Dashboard",
+    "files": [
+      "dist/**",
+      "electron/**",
+      "bridge/**",
+      "package.json"
+    ],
+    "win": {
+      "target": "portable"
+    },
+    "portable": {
+      "artifactName": "HuntDashboard-${version}-portable.exe"
+    },
+    "electronLanguages": [
+      "en-US",
+      "th"
+    ],
+    "compression": "maximum"
+  },
   "dependencies": {
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
@@ -25,6 +49,9 @@
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^5.0.0",
     "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
     "tailwindcss": "^4.1.0",
     "typescript": "^5.8.0",
     "vite": "^7.0.0",

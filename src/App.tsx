@@ -294,7 +294,7 @@ function Header({ snap, link, onSettings }: { snap: Snapshot | null; link: Link;
   const q = snap?.connected ? snap.quest : undefined;
   const world = snap?.connected ? snap.world : null;
   return (
-    <header className="app-drag flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-x-6 gap-y-3">
+    <header className="flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-x-6 gap-y-3">
       <div className="flex min-w-0 items-center gap-4">
         <div className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-gold-hi/40 bg-linear-to-br from-gold-hi to-gold text-on-accent shadow-[0_0_16px_rgb(200_169_106/0.3)]">
           <Icon name="claw" size={26} stroke={2.2} />
@@ -327,7 +327,7 @@ function Header({ snap, link, onSettings }: { snap: Snapshot | null; link: Link;
           <span className={cx('size-2.5 rounded-full', LINK_DOT[link])} />
           <span className={cx('text-[15px]', link === 'stale' ? 'text-accent' : 'text-ink-2')}>{t.link[link]}</span>
         </Chip>
-        <button type="button" onClick={onSettings} title={t.settings.open} aria-label={t.settings.open} data-nodrag
+        <button type="button" onClick={onSettings} title={t.settings.open} aria-label={t.settings.open}
           className="flex size-12 items-center justify-center rounded-xl border border-line bg-surface/90 text-muted hover:border-gold hover:text-gold-hi focus-visible:outline-2 focus-visible:outline-gold">
           <Icon name="gear" size={22} stroke={1.8} />
         </button>

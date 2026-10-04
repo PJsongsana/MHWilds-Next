@@ -20,7 +20,8 @@ function isLocalOrigin(origin) {
   if (!origin) return true; // non-browser client
   try {
     const u = new URL(origin);
-    return u.protocol === 'tauri:' || ['localhost', '127.0.0.1', '[::1]', 'tauri.localhost'].includes(u.hostname);
+    // file: = the Electron app loading dist/index.html. Origin "null" (sandboxed iframes on any site) stays rejected.
+    return u.protocol === 'tauri:' || u.protocol === 'file:' || ['localhost', '127.0.0.1', '[::1]', 'tauri.localhost'].includes(u.hostname);
   } catch {
     return false;
   }

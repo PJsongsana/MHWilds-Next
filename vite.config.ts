@@ -15,5 +15,6 @@ const bridge = (): Plugin => ({
 
 export default defineConfig({
   plugins: [react(), tailwindcss(), bridge()],
+  base: './', // relative asset paths so the Electron app can load dist/index.html from disk
   server: { host: '127.0.0.1', port: 5173 },
 });

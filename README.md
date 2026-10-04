@@ -16,7 +16,15 @@ npm run install-lua   # copies the Lua script into <game>/reframework/autorun (n
 npm run dev           # UI on http://127.0.0.1:5173 + bridge on ws://127.0.0.1:8787
 ```
 
-Open the page on the second monitor and press F11. After editing Lua in game: REFramework menu → ScriptRunner → Reset scripts.
+Open the page on the second monitor and press F11 — or run it as a desktop app:
+
+```bash
+npm run app       # builds the UI, opens a borderless window on the second monitor (bridge included)
+npm run app:dev   # same window, but showing the running dev server
+```
+
+The app window remembers its position, never takes focus from the game, F11 = fullscreen, Alt+F4 closes, drag it by the header.
+Press **S** (or the gear button) for settings: bridge port, size, alert sounds, which panels to show. After a quest ends the dashboard shows a hunt summary (time, damage, DPS chart, crit and weak-spot rates) until the next quest starts. After editing Lua in game: REFramework menu → ScriptRunner → Reset scripts.
 
 Game folder is found from Steam's `libraryfolders.vdf`; override with `MHW_GAME_DIR`.
 

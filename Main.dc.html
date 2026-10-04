@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<title>Tactical dashboard</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#F2A541}a:hover{color:#FFC978}
+</style>
+</helmet>
+<div style="width: 1600px; height: 900px; box-sizing: border-box; padding: 24px 28px; background: #0B0E13; color: #E8E6E1; font-family: 'Chakra Petch', sans-serif; display: flex; flex-direction: column; gap: 18px">
+
+  <div style="display: flex; align-items: center; justify-content: space-between; gap: 24px; height: 56px">
+    <div style="display: flex; align-items: center; gap: 16px">
+      <div style="width: 44px; height: 44px; border-radius: 12px; background: #F2A541; color: #1A1206; display: flex; align-items: center; justify-content: center">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 19L13 4 M10 20L17 6 M14 20L20 9"></path></svg>
+      </div>
+      <div style="display: flex; flex-direction: column">
+        <div style="font-size: 12px; letter-spacing: 3px; color: #8C96A3">HUNT DASHBOARD</div>
+        <div style="font-size: 21px; font-weight: 600">[ชื่อเควส] · ล่า 1 ตัว</div>
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 12px">
+      <div style="display: flex; align-items: center; gap: 10px; background: #151A21; border: 1px solid #232A35; border-radius: 12px; padding: 8px 16px">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8C96A3" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-18 0a9 9 0 0 1 18 0Z M12 7v5l3 2"></path></svg>
+        <span style="font-size: 28px; font-weight: 700">12:34</span>
+        <span style="font-size: 15px; color: #8C96A3">/ 50:00</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px; background: #151A21; border: 1px solid #232A35; border-radius: 12px; padding: 12px 16px">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9DB7F0" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"></path></svg>
+        <span style="font-size: 18px; font-weight: 600">18:20 กลางคืน</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px; background: #151A21; border: 1px solid #232A35; border-radius: 12px; padding: 12px 16px">
+        <div style="width: 10px; height: 10px; border-radius: 5px; background: #5BC489"></div>
+        <span style="font-size: 15px; color: #B8C0CA">เชื่อมต่อเกมแล้ว</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="flex: 1; display: grid; grid-template-columns: 470px minmax(0, 1fr) 390px; gap: 18px; min-height: 0">
+
+    <div style="background: #151A21; border: 1px solid #232A35; border-radius: 18px; padding: 24px; display: flex; flex-direction: column; gap: 18px">
+      <div style="display: flex; justify-content: space-between; align-items: center; gap: 12px">
+        <div style="display: flex; align-items: center; gap: 14px">
+          <div style="width: 58px; height: 58px; border-radius: 29px; background: #1E242E; border: 2px solid #F2A541; color: #F2A541; display: flex; align-items: center; justify-content: center">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 19L13 4 M10 20L17 6 M14 20L20 9"></path></svg>
+          </div>
+          <div>
+            <div style="font-size: 30px; font-weight: 700; line-height: 1.1">Rey Dau</div>
+            <div style="display: flex; align-items: center; gap: 6px; font-size: 15px; color: #E9C46A">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8l4 4l5-6l5 6l4-4l-2 11H5L3 8Z"></path></svg>
+              <span>ขนาด 112% · มงกุฎทอง</span>
+            </div>
+          </div>
+        </div>
+        <sc-if value="{{enraged}}" hint-placeholder-val="{{ true }}">
+          <div style="display: flex; align-items: center; gap: 8px; background: #3A1714; border: 1px solid #E5533D; color: #FF8C79; border-radius: 12px; padding: 8px 12px">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3c1 3 5 5 5 10a5 5 0 0 1-10 0c0-2 1-3.5 2-4.5c0 2 1 3 2 3c0-3-1-5 1-8.5Z"></path></svg>
+            <div style="display: flex; flex-direction: column; line-height: 1.1">
+              <span style="font-size: 13px">โกรธ</span>
+              <span style="font-size: 20px; font-weight: 700">0:41</span>
+            </div>
+          </div>
+        </sc-if>
+      </div>
+
+      <div style="position: relative; width: 300px; height: 300px; align-self: center">
+        <svg width="300" height="300" viewBox="0 0 300 300" style="position: absolute; inset: 0; transform: rotate(-90deg)">
+          <circle cx="150" cy="150" r="130" fill="none" stroke="#1F2630" stroke-width="24"></circle>
+          <circle cx="150" cy="150" r="130" fill="none" stroke="{{hpColor}}" stroke-width="24" stroke-linecap="round" stroke-dasharray="{{ring}}"></circle>
+        </svg>
+        <svg width="300" height="300" viewBox="0 0 300 300" style="position: absolute; inset: 0">
+          <line x1="258.4" y1="114.8" x2="288.9" y2="104.9" stroke="#E8E6E1" stroke-width="3" stroke-linecap="round"></line>
+        </svg>
+        <div style="position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px">
+          <div style="font-size: 13px; letter-spacing: 3px; color: #8C96A3">HP</div>
+          <div style="font-size: 88px; font-weight: 700; line-height: 0.95">18<span style="font-size: 40px">%</span></div>
+          <div style="font-size: 15px; color: #8C96A3">4,320 / 24,000</div>
+        </div>
+      </div>
+
+      <div style="display: flex; align-items: center; justify-content: center; gap: 10px; background: #F2A541; color: #1A1206; border-radius: 12px; padding: 13px; font-size: 21px; font-weight: 700">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4 M12 17v4 M3 12h4 M17 12h4 M12 8a4 4 0 1 0 0 8a4 4 0 0 0 0-8Z"></path></svg>
+        <span>จับได้แล้ว · ใช้กับดักได้</span>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+        <div style="display: flex; align-items: center; gap: 12px; background: #1B212A; border-radius: 12px; padding: 12px 14px">
+          <div style="width: 38px; height: 38px; border-radius: 10px; background: #3A1714; color: #FF8C79; display: flex; align-items: center; justify-content: center">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 19L13 4 M10 20L17 6"></path></svg>
+          </div>
+          <div>
+            <div style="font-size: 13px; color: #8C96A3">แผลที่เปิด</div>
+            <div style="font-size: 24px; font-weight: 700; line-height: 1.1">3</div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px; background: #1B212A; border-radius: 12px; padding: 12px 14px">
+          <div style="width: 38px; height: 38px; border-radius: 10px; background: #172A3B; color: #7CC0F2; display: flex; align-items: center; justify-content: center">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4l6 6l-3 3l-6-6l3-3Z M11 7L4 14l3 3l7-7"></path></svg>
+          </div>
+          <div>
+            <div style="font-size: 13px; color: #8C96A3">ทำลายแล้ว</div>
+            <div style="font-size: 24px; font-weight: 700; line-height: 1.1">2 / 5</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div style="background: #151A21; border: 1px solid #232A35; border-radius: 18px; padding: 24px 28px; display: flex; flex-direction: column; gap: 14px">
+      <div style="display: flex; align-items: center; justify-content: space-between">
+        <div style="display: flex; align-items: center; gap: 10px">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8C96A3" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4l6 6l-3 3l-6-6l3-3Z M11 7L4 14l3 3l7-7"></path></svg>
+          <span style="font-size: 13px; letter-spacing: 3px; color: #8C96A3">ส่วนที่ทำลายได้</span>
+        </div>
+        <span style="font-size: 14px; color: #8C96A3">เรียงตามใกล้ทำลาย</span>
+      </div>
+      <sc-for list="{{parts}}" as="p" hint-placeholder-count="5">
+        <div style="display: flex; align-items: center; gap: 16px; background: {{p.rowBg}}; border: 1px solid {{p.rowBorder}}; border-radius: 14px; padding: 14px 18px">
+          <div style="width: 42px; height: 42px; flex-shrink: 0; border-radius: 12px; background: {{p.iconBg}}; color: {{p.iconColor}}; display: flex; align-items: center; justify-content: center">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="{{p.icon}}"></path></svg>
+          </div>
+          <div style="flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0">
+            <div style="display: flex; justify-content: space-between; align-items: baseline">
+              <span style="font-size: 21px; font-weight: 600">{{p.name}}</span>
+              <span style="font-size: 17px; font-weight: 600; color: {{p.labelColor}}">{{p.label}}</span>
+            </div>
+            <div style="height: 10px; background: #1F2630; border-radius: 5px; overflow: hidden">
+              <div style="height: 100%; width: {{p.w}}; background: {{p.color}}; border-radius: 5px"></div>
+            </div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 18px; min-height: 0">
+      <div style="background: #151A21; border: 1px solid #232A35; border-radius: 18px; padding: 20px 22px; display: flex; flex-direction: column; gap: 12px">
+        <div style="display: flex; align-items: center; gap: 10px">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8C96A3" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L4 14h7l-1 8l9-12h-7l1-8Z"></path></svg>
+          <span style="font-size: 13px; letter-spacing: 3px; color: #8C96A3">สถานะผิดปกติ</span>
+        </div>
+        <sc-for list="{{ailments}}" as="a" hint-placeholder-count="4">
+          <div style="display: flex; align-items: center; gap: 12px">
+            <div style="width: 36px; height: 36px; flex-shrink: 0; border-radius: 10px; background: {{a.bg}}; color: {{a.color}}; display: flex; align-items: center; justify-content: center">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="{{a.icon}}"></path></svg>
+            </div>
+            <div style="flex: 1; display: flex; flex-direction: column; gap: 6px; min-width: 0">
+              <div style="display: flex; justify-content: space-between; align-items: baseline">
+                <span style="font-size: 17px; font-weight: 600">{{a.name}}</span>
+                <span style="font-size: 14px; color: #8C96A3">×{{a.procs}} · <b style="color: #E8E6E1">{{a.pct}}</b></span>
+              </div>
+              <div style="height: 8px; background: #1F2630; border-radius: 4px; overflow: hidden">
+                <div style="height: 100%; width: {{a.pct}}; background: {{a.color}}; border-radius: 4px"></div>
+              </div>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+
+      <div style="flex: 1; background: #151A21; border: 1px solid #232A35; border-radius: 18px; padding: 20px 22px; display: flex; flex-direction: column; gap: 10px">
+        <div style="display: flex; align-items: center; gap: 10px">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8C96A3" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9c-4.5-1-8-4-8-9V6l8-3Z"></path></svg>
+          <span style="font-size: 13px; letter-spacing: 3px; color: #8C96A3">บัฟของเรา</span>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+          <sc-for list="{{buffs}}" as="b" hint-placeholder-count="4">
+            <div style="display: flex; flex-direction: column; gap: 8px; background: {{b.bg}}; border: 1px solid {{b.border}}; border-radius: 12px; padding: 12px">
+              <div style="display: flex; align-items: center; gap: 8px; color: {{b.iconColor}}">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="{{b.icon}}"></path></svg>
+                <span style="font-size: 14px; color: #B8C0CA">{{b.name}}</span>
+              </div>
+              <div style="font-size: 24px; font-weight: 700; color: {{b.timeColor}}; line-height: 1">{{b.time}}</div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="background: #151A21; border: 1px solid #232A35; border-radius: 18px; padding: 16px 24px; display: flex; align-items: center; gap: 24px">
+    <div style="display: flex; align-items: center; gap: 10px; flex-shrink: 0; width: 150px">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#8C96A3" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 3H21v6.5L9.5 21L3 14.5L14.5 3Z M7 13l4 4"></path></svg>
+      <div style="display: flex; flex-direction: column">
+        <span style="font-size: 13px; letter-spacing: 3px; color: #8C96A3">ดาเมจทีม</span>
+        <span style="font-size: 15px; color: #B8C0CA">DPS 32.4</span>
+      </div>
+    </div>
+    <div style="flex: 1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px">
+      <sc-for list="{{players}}" as="pl" hint-placeholder-count="4">
+        <div style="display: flex; flex-direction: column; gap: 6px">
+          <div style="display: flex; justify-content: space-between; align-items: center">
+            <div style="display: flex; align-items: center; gap: 8px">
+              <div style="width: 10px; height: 10px; border-radius: 5px; background: {{pl.color}}"></div>
+              <span style="font-size: 16px; font-weight: 600">{{pl.name}}</span>
+            </div>
+            <span style="font-size: 15px; color: #8C96A3">{{pl.dmg}} · <b style="color: #E8E6E1">{{pl.pct}}</b></span>
+          </div>
+          <div style="height: 8px; background: #1F2630; border-radius: 4px; overflow: hidden">
+            <div style="height: 100%; width: {{pl.pct}}; background: {{pl.color}}; border-radius: 4px"></div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"enraged":{"editor":"boolean","default":true},"$preview":{"width":1600,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    var hp = 0.18, c = 2 * Math.PI * 130;
+    var I = {
+      head: 'M12 3a7 7 0 0 0-7 7v3l-2 4h18l-2-4v-3a7 7 0 0 0-7-7Z M9 11h.01 M15 11h.01',
+      wing: 'M3 18c4-1 7-4 9-12c2 8 5 11 9 12 M7 16l2-4 M17 16l-2-4',
+      tail: 'M4 20c6 0 9-3 9-8s3-8 7-8 M17 4l3 0l0 3',
+      leg: 'M9 3v9l-4 8 M15 3v9l4 8 M5 20h4 M15 20h4',
+      check: 'M5 12l5 5l9-10',
+      bolt: 'M13 2L4 14h7l-1 8l9-12h-7l1-8Z',
+      drop: 'M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11Z M10 14h.01 M14 16h.01',
+      star: 'M12 3l2.6 5.6l6.1.7l-4.5 4.2l1.2 6l-5.4-3l-5.4 3l1.2-6l-4.5-4.2l6.1-.7Z',
+      zz: 'M4 6h6l-6 7h6 M14 12h5l-5 6h5',
+      flask: 'M9 3h6 M10 3v6l-5 9a2 2 0 0 0 2 3h10a2 2 0 0 0 2-3l-5-9V3',
+      leaf: 'M5 19c0-8 6-14 15-14c0 9-6 15-14 15 M5 19l7-7',
+      shield: 'M12 3l8 3v6c0 5-3.5 8-8 9c-4.5-1-8-4-8-9V6l8-3Z',
+      cup: 'M5 9h11v6a5 5 0 0 1-10 0V9Z M16 11h2a2 2 0 0 1 0 4h-2 M8 3c0 2 2 2 2 4 M12 3c0 2 2 2 2 4'
+    };
+    var part = function (name, icon, pct, broken) {
+      var near = !broken && pct < 25;
+      return {
+        name: name, w: pct + '%',
+        icon: broken ? I.check : I[icon],
+        label: broken ? 'ทำลายแล้ว' : (near ? 'อีก ' + pct + '%' : pct + '%'),
+        color: near ? '#F2A541' : '#5AA9E6',
+        labelColor: broken ? '#6F7987' : (near ? '#F2A541' : '#E8E6E1'),
+        rowBg: near ? '#221B10' : '#1B212A',
+        rowBorder: near ? '#6B4A1C' : '#1B212A',
+        iconBg: broken ? '#1F2630' : (near ? '#3A2A10' : '#172A3B'),
+        iconColor: broken ? '#6F7987' : (near ? '#F2A541' : '#7CC0F2')
+      };
+    };
+    var ail = function (name, icon, color, bg, procs, pct) {
+      return { name: name, icon: I[icon], color: color, bg: bg, procs: procs, pct: pct + '%' };
+    };
+    var buff = function (name, icon, time, warn) {
+      return { name: name, icon: I[icon], time: time,
+        bg: warn ? '#2A1F0E' : '#1B212A', border: warn ? '#6B4A1C' : '#1B212A',
+        iconColor: warn ? '#F2A541' : '#8FD3A8', timeColor: warn ? '#F2A541' : '#E8E6E1' };
+    };
+    var enraged = this.props.enraged ?? true;
+    return {
+      enraged: enraged,
+      hpColor: '#F2A541',
+      ring: (c * hp) + ' ' + c,
+      parts: [
+        part('หัว', 'head', 12, false),
+        part('ปีกขวา', 'wing', 46, false),
+        part('ขาหน้า', 'leg', 71, false),
+        part('ปีกซ้าย', 'wing', 0, true),
+        part('หาง', 'tail', 0, true)
+      ],
+      ailments: [
+        ail('อัมพาต', 'bolt', '#E6C84A', '#2E2810', 1, 82),
+        ail('พิษ', 'drop', '#B48BE8', '#251C33', 2, 35),
+        ail('สตัน', 'star', '#E8E6E1', '#262B33', 0, 64),
+        ail('หลับ', 'zz', '#8FB4F2', '#17233A', 0, 10)
+      ],
+      buffs: [
+        buff('Demondrug', 'flask', '∞', false),
+        buff('Might Seed', 'leaf', '0:12', true),
+        buff('Mantle', 'shield', '1:48', false),
+        buff('Hot Drink', 'cup', '6:30', false)
+      ],
+      players: [
+        { name: 'คุณ', dmg: '9,820', pct: '41%', color: '#F2A541' },
+        { name: 'Player 2', dmg: '6,240', pct: '26%', color: '#5AA9E6' },
+        { name: 'Player 3', dmg: '4,800', pct: '20%', color: '#8FD3A8' },
+        { name: 'Player 4', dmg: '3,100', pct: '13%', color: '#B48BE8' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

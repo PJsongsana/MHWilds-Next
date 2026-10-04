@@ -1,12 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Icon, iconFor, type IconName } from './icons';
 import {
-  buffViews, callouts, dpsSeries, elementRank, elementStars, fmtInt, monsterInfo, hpState, mmss, partViews, partyViews, pct, physTypeFor, physValue,
-  pickMonster, questSummary, ratio, weakSpots, WEAK_HITZONE,
-  type Ailment, type Callout, type DamageSample, type Hitzone, type Link, type Monster, type MonsterInfo, type PartView, type PhysType, type Scar,
-  type Snapshot, type Vitals,
+  buffViews, callouts, dpsSeries, elementRank, fmtInt, hpState, mmss, partViews, partyViews, pct, physTypeFor, physValue,
+  pickMonster, questSummary, ratio, uptimeViews, weakSpots, WEAK_HITZONE,
+  type Ailment, type Callout, type DamageSample, type Hitzone, type Link, type Monster, type PartView, type PhysType, type Scar,
+  type HuntRecord, type Snapshot, type Vitals,
 } from './logic';
 import { mocks } from './mocks';
+import { useHistory } from './history';
 import { DEFAULT_SETTINGS, setSettings, useSettings, type PanelKey } from './settings';
 import { t } from './strings';
 import { mockName, useHunt } from './useHunt';
@@ -38,6 +39,11 @@ const PARTY_COLORS = ['#5AA9E6', '#8FD3A8', '#B48BE8'];
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ');
 
+// Present only inside the desktop app (electron/preload.cjs).
+declare global {
+  interface Window { huntApp?: { setDiscord(cfg: { enabled: boolean; clientId: string; port: number }): void } }
+}
+
 function useCanvas(scale: number) {
   const calc = () => {
     const portrait = innerWidth / innerHeight < PORTRAIT_BELOW;
@@ -65,6 +71,7 @@ export default function App() {
   const inQuest = !!snap?.connected && !!snap.quest?.active;
   const { monster } = snap ? pickMonster(snap) : { monster: null };
   useAlertSound(inQuest && snap ? callouts(snap, monster) : [], settings.sound);
+  useEffect(() => { window.huntApp?.setDiscord({ ...settings.discord, port: settings.port }); }, [settings.discord, settings.port]);
 
   // S opens settings, Esc closes (spec §10: keyboard usable, nothing needed while playing)
   useEffect(() => {
@@ -85,7 +92,7 @@ export default function App() {
         ) : link === 'offline' ? (
           <Center icon="clock" title={t.waitingGame} sub={snap?.error} />
         ) : !inQuest ? (
-          summary ? <SummaryView snap={summary.snap} samples={summary.samples} /> : <Center icon="target" title={t.notInQuest} />
+          <HistoryView latest={summary} />
         ) : (
           <div className={cx('flex min-h-0 flex-1 flex-col gap-4 transition-opacity', link === 'stale' && 'opacity-50')}>
             <Dashboard snap={snap!} layout={layout} samples={samples} />
@@ -281,7 +288,6 @@ function Center({ icon, title, sub }: { icon: IconName; title: string; sub?: str
       <Icon name={icon} size={44} stroke={1.8} className="text-muted" />
       <div className="text-[30px] font-bold">{title}</div>
       {sub && <div className="text-[17px] text-ink-2">{sub}</div>}
-      <div className="absolute bottom-4 text-[13px] text-muted">{t.dataCredit}</div>
     </Panel>
   );
 }
@@ -348,7 +354,6 @@ function MonsterPane({ m, phys, selected, ringZoom, fitContent }: { m: Monster; 
   const { panels } = useSettings();
   const state = hpState(m);
   const done = state === 'done';
-  const info = monsterInfo(m);
   const broken = m.parts.filter((p) => p.broken).length;
   return (
     <Panel className={cx('flex min-h-0 min-w-0 flex-col gap-3 p-4', fitContent ? 'flex-auto' : 'flex-1', selected && 'border-gold! shadow-[0_0_20px_rgb(200_169_106/0.2)]', done && 'opacity-70')}>
@@ -360,7 +365,6 @@ function MonsterPane({ m, phys, selected, ringZoom, fitContent }: { m: Monster; 
           </div>
           <div className="min-w-0">
             <div className={cx('truncate font-display text-[24px] leading-[1.15] font-bold', selected && 'text-gold-hi')}>{m.name}</div>
-            {info && <div className="truncate text-[12px] text-muted" title={t.dataCredit}>{[info.type, info.habitat.join(', ')].filter(Boolean).join(' · ')}</div>}
           </div>
         </div>
         {m.enraged && !done && <EnrageBadge remainSec={m.enrageRemainSec} />}
@@ -371,7 +375,7 @@ function MonsterPane({ m, phys, selected, ringZoom, fitContent }: { m: Monster; 
         <div className="flex min-w-0 flex-1 flex-col gap-2">
           {state === 'capture' && <CaptureBanner />}
           {done && <div className="rounded-xl border border-line bg-surface-2 p-2.5 text-center text-lg font-bold text-ink-2">{t.done}</div>}
-          {!done && <WeakStrip hitzones={m.hitzones} phys={phys} info={info} />}
+          {!done && <WeakStrip hitzones={m.hitzones} phys={phys} />}
           <div className="flex gap-2 text-[13px] text-muted">
             {m.wounds != null && <span className="rounded-lg bg-surface-2 px-2.5 py-1.5">{t.wounds} <b className="text-[17px] text-danger-ink">{m.wounds}</b></span>}
             {m.parts.length > 0 && <span className="rounded-lg bg-surface-2 px-2.5 py-1.5">{t.breaks} <b className="text-[17px] text-info-soft">{broken}/{m.parts.length}</b></span>}
@@ -397,7 +401,6 @@ function MonsterCard({ monster: m, ringZoom, phys }: { monster: Monster | null; 
   const done = state === 'done';
   const broken = m.parts.filter((p) => p.broken).length;
   const sizeLine = [m.sizePct != null && t.size(m.sizePct), m.crown && t.crown[m.crown]].filter(Boolean).join(' · ');
-  const info = monsterInfo(m);
   const raw = m.scars.filter((s) => s.state === 'raw').length;
   const tear = m.scars.filter((s) => s.state === 'tear').length;
 
@@ -417,9 +420,6 @@ function MonsterCard({ monster: m, ringZoom, phys }: { monster: Monster | null; 
                 <span className="truncate">{sizeLine}</span>
               </div>
             )}
-            {info && (
-              <div className="truncate text-[13px] text-muted" title={t.dataCredit}>{[info.type, info.habitat.join(', ')].filter(Boolean).join(' · ')}</div>
-            )}
           </div>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">
@@ -437,7 +437,7 @@ function MonsterCard({ monster: m, ringZoom, phys }: { monster: Monster | null; 
         </div>
       )}
 
-      {!done && <WeakStrip hitzones={m.hitzones} phys={phys} info={info} />}
+      {!done && <WeakStrip hitzones={m.hitzones} phys={phys} />}
 
       <div className="mt-auto flex flex-wrap gap-2 text-[13px] text-muted">
         {m.wounds != null && (
@@ -496,12 +496,9 @@ function HpRing({ m, state }: { m: Monster; state: ReturnType<typeof hpState> })
   );
 }
 
-function WeakStrip({ hitzones, phys, info }: { hitzones: Hitzone[]; phys: PhysType | null; info: MonsterInfo | null }) {
+function WeakStrip({ hitzones, phys }: { hitzones: Hitzone[]; phys: PhysType | null }) {
   const spots = weakSpots(hitzones, phys);
-  // live hitzone values from the game; site stars (0–3) only when the game gave none
-  const els: { el: string; label: string }[] = hitzones.length
-    ? elementRank(hitzones).slice(0, 3).map((e) => ({ el: e.el, label: String(e.value) }))
-    : elementStars(info).slice(0, 3).map((e) => ({ el: e.el, label: '★'.repeat(e.stars) }));
+  const els = elementRank(hitzones).slice(0, 3).map((e) => ({ el: e.el, label: String(e.value) }));
   if (spots.length === 0 && els.length === 0) return null;
   return (
     <div className="grid grid-cols-[64px_1fr] items-center gap-x-3 gap-y-2 rounded-xl border border-line/70 bg-surface-2/80 px-3.5 py-3">
@@ -753,6 +750,7 @@ const BUFF_STYLE = {
   normal: { card: 'bg-surface-2 border-surface-2', icon: 'text-buff', time: 'text-ink' },
   infinite: { card: 'bg-surface-2 border-surface-2', icon: 'text-buff', time: 'text-ink' },
   warn: { card: 'bg-accent-warn border-accent-line', icon: 'text-accent', time: 'text-accent' },
+  cooldown: { card: 'bg-surface-2/50 border-dashed border-line', icon: 'text-muted', time: 'text-muted' }, // mantle recharging: info, not an alert
 };
 
 function BuffsPanel({ snap }: { snap: Snapshot }) {
@@ -771,7 +769,7 @@ function BuffsPanel({ snap }: { snap: Snapshot }) {
             // one line: icon · name · time — four fit in two rows of the bottom player block
             <div key={b.id} className={cx('flex h-11 min-w-0 items-center gap-2.5 rounded-xl border px-3', s.card)}>
               <Icon name={icon} size={18} className={cx('shrink-0', s.icon)} />
-              <span className="min-w-0 flex-1 truncate text-sm text-ink-2">{b.name}</span>
+              <span className="min-w-0 flex-1 truncate text-sm text-ink-2">{b.name}{b.cooldown && <span className="ml-1.5 text-xs text-muted">{t.cooldown}</span>}</span>
               <span className={cx('shrink-0 text-[22px] leading-none font-bold', s.time)}>{b.remainSec == null ? '∞' : mmss(b.remainSec)}</span>
             </div>
           );
@@ -820,7 +818,7 @@ function DamageMeter({ members, dps, samples }: ReturnType<typeof partyViews> & 
         {members.map((m, i) => {
           const color = m.self ? '#F2A541' : PARTY_COLORS[other++ % PARTY_COLORS.length];
           return (
-            <div key={`${m.name}-${i}`} className="grid grid-cols-[minmax(0,100px)_minmax(0,1fr)_auto_auto] items-center gap-3">
+            <div key={`${m.name}-${i}`} className={cx('grid grid-cols-[minmax(0,100px)_minmax(0,1fr)_auto_auto] items-center gap-3', m.palico && 'pl-4 opacity-80')}>
               <div className="flex min-w-0 items-center gap-2">
                 <span className="size-2.5 shrink-0 rounded-full" style={{ background: color }} />
                 <span className={cx('truncate text-[15px] font-semibold', m.self && 'text-accent')}>{m.name}</span>
@@ -857,7 +855,45 @@ function DpsChart({ samples, height, fill }: { samples: DamageSample[]; height: 
 
 /* ------------------------------ post-quest summary ------------------------------ */
 
-function SummaryView({ snap, samples }: { snap: Snapshot; samples: DamageSample[] }) {
+// Out of a quest: the latest hunt's summary, plus a strip of earlier hunts to flip through (click or ←/→).
+function HistoryView({ latest }: { latest: { snap: Snapshot; samples: DamageSample[]; uptime: HuntRecord['uptime'] } | null }) {
+  const records = useHistory();
+  const [i, setI] = useState(0);
+  useEffect(() => { setI(0); }, [records.length]); // a new hunt was saved → show it
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowRight') setI((v) => Math.min(v + 1, records.length - 1));
+      else if (e.key === 'ArrowLeft') setI((v) => Math.max(v - 1, 0));
+    };
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  }, [records.length]);
+  const r = records[i];
+  if (!r && !latest) return <Center icon="target" title={t.notInQuest} />;
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
+      {r ? <SummaryView snap={r.snap} samples={r.samples} uptime={r.uptime} /> : <SummaryView snap={latest!.snap} samples={latest!.samples} uptime={latest!.uptime} />}
+      {records.length > 1 && (
+        <nav aria-label={t.summary.history} className="flex shrink-0 gap-2 overflow-x-auto pb-1">
+          {records.map((h, k) => {
+            const self = h.snap.party.find((m) => m.self);
+            return (
+              <button key={h.id} type="button" onClick={() => setI(k)} aria-current={k === i}
+                className={cx('flex min-w-44 shrink-0 flex-col items-start gap-0.5 rounded-xl border px-3 py-2 text-left text-xs',
+                  k === i ? 'border-gold bg-[#241C12] text-ink' : 'border-line bg-surface/80 text-ink-2 hover:border-gold/60')}>
+                <span className="text-muted">{new Date(h.endedAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                <span className="max-w-40 truncate font-display text-sm font-semibold">{h.snap.monsters.map((m) => m.name).join(', ') || t.quest}</span>
+                <span>{mmss(h.snap.quest?.elapsedSec ?? 0)} · {fmtInt(self?.damage ?? 0)}</span>
+              </button>
+            );
+          })}
+        </nav>
+      )}
+    </div>
+  );
+}
+
+function SummaryView({ snap, samples, uptime }: { snap: Snapshot; samples: DamageSample[]; uptime?: HuntRecord['uptime'] }) {
   const s = questSummary(snap);
   let other = 0;
   return (
@@ -887,6 +923,20 @@ function SummaryView({ snap, samples }: { snap: Snapshot; samples: DamageSample[
         </div>
       )}
       {samples.length > 2 && <DpsChart samples={samples} height={110} />}
+      {uptime && Object.keys(uptime).length > 0 && (
+        <div className="flex flex-col gap-2">
+          <span className="text-[13px] text-muted">{t.summary.uptime}</span>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-x-6 gap-y-2">
+            {uptimeViews(uptime, s.elapsed).map((u) => (
+              <div key={u.id} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-3 text-sm">
+                <span className="truncate text-ink-2">{u.name}</span>
+                <Bar value={u.pct / 100} color={u.pct >= 80 ? '#8FD3A8' : '#C8A96A'} h={6} />
+                <b className="w-10 text-right">{u.pct}%</b>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       <div className="grid grid-cols-[minmax(0,1.4fr)_repeat(4,minmax(0,1fr))] gap-x-4 gap-y-2.5 text-[15px]">
         {[t.summary.hunter, t.summary.damage, 'DPS', t.crit, t.summary.weak].map((h) => <span key={h} className="text-[13px] text-muted">{h}</span>)}
         {s.party.members.map((m, i) => {
@@ -936,6 +986,23 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
           <input type="checkbox" checked={s.sound} className="size-5 accent-gold"
             onChange={(e) => { setSettings({ sound: e.target.checked }); if (e.target.checked) beep(TONES.capture!); }} />
         </label>
+        {window.huntApp && (
+          <fieldset className="flex flex-col gap-2">
+            <legend className="mb-1 text-muted">Discord</legend>
+            <label className="flex items-center justify-between gap-4">
+              <span>{t.settings.discord}</span>
+              <input type="checkbox" checked={s.discord.enabled} className="size-5 accent-gold"
+                onChange={(e) => setSettings({ discord: { ...s.discord, enabled: e.target.checked } })} />
+            </label>
+            <label className="flex items-center justify-between gap-4">
+              <span>{t.settings.discordId}</span>
+              <input type="text" inputMode="numeric" value={s.discord.clientId} placeholder="1234567890123456789"
+                onChange={(e) => setSettings({ discord: { ...s.discord, clientId: e.target.value.replace(/D/g, '') } })}
+                className="w-52 rounded-lg border border-line bg-surface-2 px-3 py-1.5 text-right" />
+            </label>
+            <p className="text-xs text-muted">{t.settings.discordHint}</p>
+          </fieldset>
+        )}
         <fieldset className="flex flex-col gap-2">
           <legend className="mb-1 text-muted">{t.settings.panels}</legend>
           {PANEL_KEYS.map((k) => (

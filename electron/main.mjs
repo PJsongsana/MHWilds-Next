@@ -4,11 +4,12 @@
 // A normal Windows window (resize, maximize, Snap; dark title bar), F11 = fullscreen.
 // Opens on the second monitor the first time, then remembers position / maximized,
 // and never takes focus from the game (shown inactive).
-import { app, BrowserWindow, nativeTheme, screen } from 'electron';
+import { app, BrowserWindow, ipcMain, nativeTheme, screen } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startBridge } from '../bridge/server.js';
+import { configureDiscord, shutdownDiscord } from './discord.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dev = process.argv.includes('--dev');
@@ -43,7 +44,8 @@ app.whenReady().then(() => {
     backgroundColor: '#0D0A07',
     title: 'Hunt Dashboard',
     autoHideMenuBar: true,
-    webPreferences: { backgroundThrottling: false }, // keep updating while the game has focus
+    // keep updating while the game has focus; preload exposes window.huntApp (Discord settings)
+    webPreferences: { backgroundThrottling: false, preload: path.join(here, 'preload.cjs') },
   });
   if (dev) win.loadURL('http://127.0.0.1:5173');
   else win.loadFile(path.join(here, '../dist/index.html'));
@@ -64,7 +66,10 @@ app.whenReady().then(() => {
     if (input.type === 'keyDown' && input.key === 'F11') win.setFullScreen(!win.isFullScreen());
   });
 
+  ipcMain.on('discord:configure', (_e, cfg) => configureDiscord(cfg));
+
   app.on('window-all-closed', () => {
+    shutdownDiscord();
     bridge?.close();
     app.quit();
   });

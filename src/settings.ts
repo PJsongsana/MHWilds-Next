@@ -7,6 +7,7 @@ export interface Settings {
   scale: number; // multiplies the auto-fit zoom
   sound: boolean;
   panels: Record<PanelKey, boolean>;
+  discord: { enabled: boolean; clientId: string }; // desktop app only
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -14,6 +15,7 @@ export const DEFAULT_SETTINGS: Settings = {
   scale: 1,
   sound: false, // browsers only allow audio after a click, so it's opt-in from the settings screen
   panels: { now: true, parts: true, ailments: true, buffs: true, damage: true },
+  discord: { enabled: false, clientId: '' },
 };
 
 const KEY = 'hunt-dashboard-settings';
@@ -21,7 +23,7 @@ const KEY = 'hunt-dashboard-settings';
 function load(): Settings {
   try {
     const saved = JSON.parse(localStorage.getItem(KEY) ?? '{}');
-    return { ...DEFAULT_SETTINGS, ...saved, panels: { ...DEFAULT_SETTINGS.panels, ...saved.panels } };
+    return { ...DEFAULT_SETTINGS, ...saved, panels: { ...DEFAULT_SETTINGS.panels, ...saved.panels }, discord: { ...DEFAULT_SETTINGS.discord, ...saved.discord } };
   } catch {
     return DEFAULT_SETTINGS;
   }

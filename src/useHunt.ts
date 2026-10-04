@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { linkState, normalize, type DamageSample, type Link, type Snapshot } from './logic';
+import { addHunt } from './history';
+import { addUptime, compactRecord, linkState, normalize, type DamageSample, type HuntRecord, type Link, type Snapshot } from './logic';
 import { mocks } from './mocks';
 import { useSettings } from './settings';
 
@@ -14,7 +15,7 @@ export interface HuntState {
   snap: Snapshot | null;
   link: Link;
   samples: DamageSample[];                               // cumulative damage over the current quest (DPS chart)
-  summary: { snap: Snapshot; samples: DamageSample[] } | null; // last finished quest, until the next one starts
+  summary: { snap: Snapshot; samples: DamageSample[]; uptime: HuntRecord['uptime'] } | null; // last finished quest, until the next one starts
 }
 
 const partyTotals = (s: Snapshot) => ({
@@ -32,6 +33,7 @@ export function useHunt(): HuntState {
   const [summary, setSummary] = useState<HuntState['summary']>(null);
   const samples = useRef<DamageSample[]>([]);
   const lastActive = useRef<Snapshot | null>(null);
+  const uptime = useRef<HuntRecord['uptime']>({});
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 500); // drives stale detection
@@ -70,15 +72,18 @@ export function useHunt(): HuntState {
       const last = samples.current.at(-1);
       if (!lastActive.current || (last && t < last.t - 1)) { // a new quest started
         samples.current = [];
+        uptime.current = {};
         setSummary(null);
       }
       const prev = samples.current.at(-1);
       if (!prev || t - prev.t >= SAMPLE_EVERY_SEC) {
+        if (prev) addUptime(uptime.current, s.player.buffs, t - prev.t);
         samples.current = [...samples.current.slice(-MAX_SAMPLES + 1), { t, ...partyTotals(s) }];
       }
       lastActive.current = s;
     } else if (lastActive.current) {
-      setSummary({ snap: lastActive.current, samples: samples.current });
+      setSummary({ snap: lastActive.current, samples: samples.current, uptime: uptime.current });
+      addHunt(compactRecord(lastActive.current, samples.current, uptime.current, Date.now()));
       lastActive.current = null;
     }
   }
@@ -90,7 +95,7 @@ export function useHunt(): HuntState {
     const fake = mockSamples(s);
     if (mockName === 'summary') {
       const idle = { ...s, quest: { active: false, elapsedSec: 0, limitSec: 0 }, monsters: [] };
-      return { snap: idle, link: 'live', samples: [], summary: { snap: s, samples: fake } };
+      return { snap: idle, link: 'live', samples: [], summary: { snap: s, samples: fake, uptime: mockUptime(s) } };
     }
     return { snap: s, link: linkState(s, true, now), samples: fake, summary: null };
   }
@@ -108,4 +113,10 @@ function mockSamples(s: Snapshot): DamageSample[] {
     out.push({ t, team: team * k, self: self * k });
   }
   return out;
+}
+
+// Uptime for the mock summary: each mock buff active for part of the quest.
+function mockUptime(s: Snapshot): HuntRecord['uptime'] {
+  const e = s.quest?.elapsedSec ?? 0;
+  return Object.fromEntries(s.player.buffs.map((b, i) => [b.id, { name: b.name, sec: e * [1, 0.62, 0.48, 0.9, 0.3][i % 5] }]));
 }

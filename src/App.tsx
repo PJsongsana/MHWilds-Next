@@ -1,0 +1,763 @@
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { Icon, iconFor, type IconName } from './icons';
+import {
+  buffViews, callouts, elementRank, elementStars, fmtInt, monsterInfo, hpState, mmss, partViews, partyViews, pct, physTypeFor, physValue, pickMonster, ratio,
+  weakSpots, WEAK_HITZONE,
+  type Ailment, type Callout, type Hitzone, type Link, type Monster, type MonsterInfo, type PartView, type PhysType, type Scar, type Snapshot,
+} from './logic';
+import { mocks } from './mocks';
+import { t } from './strings';
+import { mockName, useHunt } from './useHunt';
+
+// Responsive canvas: a minimum logical size per orientation, then stretched to the window's aspect ratio so no
+// screen area is wasted. Text scales with the window via CSS zoom.
+//   portrait  (window w/h < 0.9): everything stacked in one column, min 880×1200
+//   landscape (canvas w/h < 1.5): monsters side by side, player info as a bottom row, min 1280×860
+//   wide      (canvas w/h ≥ 1.5): same, but player info in a right column
+type Layout = 'portrait' | 'landscape' | 'wide';
+const PORTRAIT_BELOW = 0.9;
+const WIDE_FROM = 1.5;
+
+// [text, tile background] per ailment. Orange = "act now" and red = enrage only (spec §5), so none of these use them.
+const AIL_COLORS: Record<string, [string, string]> = {
+  paralysis: ['#E6C84A', '#2E2810'],
+  poison: ['#B48BE8', '#251C33'],
+  stun: ['#E8E6E1', '#262B33'],
+  sleep: ['#8FB4F2', '#17233A'],
+  blast: ['#E8A87C', '#33221A'],
+  exhaust: ['#9FB8C9', '#1C2630'],
+  ride: ['#C9A27A', '#2B2219'],
+  flash: ['#F2EDC4', '#2B2A1C'],
+  pitfall: ['#A9C27A', '#212A17'],
+};
+const ailColors = (id: string) => AIL_COLORS[id] ?? ['#B8C0CA', '#262B33'];
+const ELEMENT_COLORS: Record<string, string> = { fire: '#F0835F', water: '#5AA9E6', thunder: '#E6C84A', ice: '#9FD8F0', dragon: '#B48BE8' };
+const PARTY_COLORS = ['#5AA9E6', '#8FD3A8', '#B48BE8'];
+
+const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ');
+
+function useCanvas() {
+  const calc = () => {
+    const portrait = innerWidth / innerHeight < PORTRAIT_BELOW;
+    const [minW, minH] = portrait ? [880, 1200] : [1280, 860];
+    const zoom = Math.min(innerWidth / minW, innerHeight / minH);
+    const w = innerWidth / zoom, h = innerHeight / zoom;
+    const layout: Layout = portrait ? 'portrait' : w / h >= WIDE_FROM ? 'wide' : 'landscape';
+    return { zoom, w, h, layout };
+  };
+  const [c, setC] = useState(calc);
+  useEffect(() => {
+    const fit = () => setC(calc());
+    addEventListener('resize', fit);
+    return () => removeEventListener('resize', fit);
+  }, []);
+  return c;
+}
+
+export default function App() {
+  const { snap, link } = useHunt();
+  const { zoom, w, h, layout } = useCanvas();
+  const inQuest = !!snap?.connected && !!snap.quest?.active;
+
+  return (
+    <div className="h-full overflow-hidden">
+      <div style={{ zoom, width: w, height: h }} className="flex flex-col gap-4 px-6 py-5 tabular-nums">
+        <Header snap={snap} link={link} />
+        {link === 'connecting' ? (
+          <Center icon="clock" title={t.waitingBridge} sub={t.waitingBridgeHint} />
+        ) : link === 'offline' ? (
+          <Center icon="clock" title={t.waitingGame} sub={snap?.error} />
+        ) : !inQuest ? (
+          <Center icon="target" title={t.notInQuest} />
+        ) : (
+          <div className={cx('flex min-h-0 flex-1 flex-col gap-4 transition-opacity', link === 'stale' && 'opacity-50')}>
+            <Dashboard snap={snap!} layout={layout} />
+          </div>
+        )}
+      </div>
+      {mockName && <MockSwitcher />}
+    </div>
+  );
+}
+
+/**
+ * Top: "do this now" for every monster. Middle: monsters. Player (our buffs + team damage) is its own block.
+ * landscape/wide: one monster = full 3-column layout, 2–3 monsters = one complete pane each, side by side;
+ *                 player block at the bottom (landscape) or right (wide).
+ * portrait:       every monster gets a full-width pane, stacked; player block at the bottom.
+ * Finished monsters (dead/captured) collapse into one slim "done" row so the live ones get the space;
+ * when only one is still alive it goes back to the full single-monster layout.
+ */
+function Dashboard({ snap, layout }: { snap: Snapshot; layout: Layout }) {
+  const phys = physTypeFor(snap.player.weapon);
+  const all = snap.monsters.slice(0, 3);
+  const alive = all.filter((m) => hpState(m) !== 'done');
+  const shown = alive.length > 0 ? alive : all; // all finished → keep showing them in full
+  const finished = alive.length > 0 ? all.filter((m) => hpState(m) === 'done') : [];
+  const monster = shown.find((m) => m.id === pickMonster(snap).monster?.id) ?? shown[0] ?? null;
+  const multi = shown.length > 1;
+  const done = finished.length > 0 && <DoneRow monsters={finished} />;
+
+  if (layout === 'portrait') {
+    return (
+      <>
+        <NowPanel items={callouts(snap, monster)} cols={2} done={done} />
+        <div className="flex min-h-0 flex-1 flex-col gap-4">
+          {shown.length === 0 && <MonsterCard monster={null} phys={phys} ringZoom={1} />}
+          {shown.map((m) => (
+            <MonsterPane key={m.id} m={m} phys={phys} selected={multi && m.id === monster?.id} ringZoom={multi ? 0.55 : 0.8} fitContent />
+          ))}
+        </div>
+        <PlayerRow snap={snap} fitContent />
+      </>
+    );
+  }
+
+  const wide = layout === 'wide';
+  const monsters = !multi ? (
+    <div className="grid min-h-0 flex-1 grid-cols-[440px_minmax(0,1fr)_360px] gap-4">
+      <MonsterCard monster={monster} phys={phys} ringZoom={wide ? 0.9 : 0.7} />
+      <PartsPanel monster={monster} phys={phys} />
+      <AilmentsPanel ailments={monster?.ailments ?? []} />
+    </div>
+  ) : (
+    <div className="grid min-h-0 flex-1 gap-4" style={{ gridTemplateColumns: `repeat(${shown.length}, minmax(0, 1fr))` }}>
+      {shown.map((m) => <MonsterPane key={m.id} m={m} phys={phys} selected={m.id === monster?.id} ringZoom={shown.length === 2 ? 0.62 : 0.5} />)}
+    </div>
+  );
+  return (
+    <>
+      <NowPanel items={callouts(snap, monster)} done={done} />
+      {wide ? (
+        <div className="flex min-h-0 flex-1 gap-4">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">{monsters}</div>
+          <PlayerColumn snap={snap} />
+        </div>
+      ) : (
+        <>
+          {monsters}
+          <PlayerRow snap={snap} />
+        </>
+      )}
+    </>
+  );
+}
+
+// Finished monsters, one slim chip each: greyed icon · name · ✓ done.
+function DoneRow({ monsters }: { monsters: Monster[] }) {
+  return (
+    <div className="flex min-w-0 shrink justify-end gap-2 overflow-hidden">
+      {monsters.map((m) => {
+        return (
+          <div key={m.id} className="flex h-7 min-w-0 items-center gap-1.5 rounded-full border border-line bg-surface-2/80 pr-3 pl-0.5">
+            <div className="flex size-6 shrink-0 items-center justify-center overflow-hidden rounded-full bg-avatar text-disabled">
+              <Icon name="claw" size={13} />
+            </div>
+            <span className="truncate font-display text-sm font-semibold text-ink-2 line-through decoration-disabled/60">{m.name}</span>
+            <span className="flex shrink-0 items-center gap-1 text-sm font-semibold text-ok">
+              <Icon name="check" size={16} stroke={2.4} />{t.done}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ---------------------------------- player ---------------------------------- */
+
+function PlayerRow({ snap, fitContent }: { snap: Snapshot; fitContent?: boolean }) {
+  return (
+    <div className={cx('grid shrink-0 grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] gap-4', fitContent ? 'items-start' : 'h-[178px]')}>
+      <BuffsPanel snap={snap} />
+      <DamageMeter {...partyViews(snap.party, snap.quest?.elapsedSec ?? 0)} />
+    </div>
+  );
+}
+
+function PlayerColumn({ snap }: { snap: Snapshot }) {
+  return (
+    <div className="flex min-h-0 w-[360px] shrink-0 flex-col gap-4">
+      <BuffsPanel snap={snap} />
+      <DamageMeter {...partyViews(snap.party, snap.quest?.elapsedSec ?? 0)} />
+    </div>
+  );
+}
+
+/* ---------------------------------- shared ---------------------------------- */
+
+function Panel({ className, children }: { className?: string; children: ReactNode }) {
+  return (
+    <section className={cx('wilds-panel', className)}>
+      {children}
+    </section>
+  );
+}
+
+function Eyebrow({ icon, children, right }: { icon: IconName; children: ReactNode; right?: ReactNode }) {
+  return (
+    // Wilds-style section title: gold icon + serif title + gold rule fading out
+    <div className="flex items-center gap-3">
+      <Icon name={icon} size={18} stroke={1.8} className="shrink-0 text-gold" />
+      <span className="shrink-0 font-display text-[15px] font-semibold tracking-wide text-gold-hi">{children}</span>
+      <span className="h-px min-w-6 flex-1 bg-linear-to-r from-gold/50 to-transparent" />
+      {right}
+    </div>
+  );
+}
+
+function Bar({ value, color, h = 10 }: { value: number; color: string; h?: number }) {
+  return (
+    <div className="overflow-hidden rounded-full bg-track" style={{ height: h }}>
+      <div className="h-full rounded-full transition-[width] duration-250 ease-out" style={{ width: `${value * 100}%`, background: color }} />
+    </div>
+  );
+}
+
+function Tile({ icon, size, className, style }: { icon: IconName; size: number; className?: string; style?: CSSProperties }) {
+  return (
+    <div className={cx('flex shrink-0 items-center justify-center rounded-xl', className)} style={{ width: size, height: size, ...style }}>
+      <Icon name={icon} size={Math.round(size * 0.53)} />
+    </div>
+  );
+}
+
+function Center({ icon, title, sub }: { icon: IconName; title: string; sub?: string }) {
+  return (
+    <Panel className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
+      <Icon name={icon} size={44} stroke={1.8} className="text-muted" />
+      <div className="text-[30px] font-bold">{title}</div>
+      {sub && <div className="text-[17px] text-ink-2">{sub}</div>}
+      <div className="absolute bottom-4 text-[13px] text-muted">{t.dataCredit}</div>
+    </Panel>
+  );
+}
+
+/* ---------------------------------- header ---------------------------------- */
+
+const LINK_DOT: Record<Link, string> = { live: 'bg-ok shadow-[0_0_8px_#5BC489]', stale: 'bg-accent', offline: 'bg-disabled', connecting: 'bg-disabled' };
+
+function Header({ snap, link }: { snap: Snapshot | null; link: Link }) {
+  const q = snap?.connected ? snap.quest : undefined;
+  const world = snap?.connected ? snap.world : null;
+  return (
+    <header className="flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-x-6 gap-y-3">
+      <div className="flex min-w-0 items-center gap-4">
+        <div className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-gold-hi/40 bg-linear-to-br from-gold-hi to-gold text-on-accent shadow-[0_0_16px_rgb(200_169_106/0.3)]">
+          <Icon name="claw" size={26} stroke={2.2} />
+        </div>
+        <div className="flex min-w-0 flex-col">
+          <div className="font-deco text-xs tracking-[4px] text-gold">{t.brand}</div>
+          <div className="truncate font-display text-[21px] font-semibold">
+            {q?.active ? `${q.name || t.quest} · ${t.hunting(snap!.monsters.length)}` : t.notInQuest}
+          </div>
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-3">
+        {q?.active && (
+          <Chip className="py-2">
+            <Icon name="clock" size={22} stroke={1.8} className="text-muted" />
+            <span className="text-[28px] font-bold">{mmss(q.elapsedSec)}</span>
+            <div className="flex flex-col text-[13px] leading-tight text-muted">
+              {q.limitSec > 0 && <span>/ {mmss(q.limitSec)}</span>}
+              {q.remainSec != null && q.remainSec > 0 && <span className="text-ink-2">{t.questRemain(mmss(q.remainSec))}</span>}
+            </div>
+          </Chip>
+        )}
+        {world && (
+          <Chip>
+            <Icon name={world.phase === 'night' || world.phase === 'dusk' ? 'moon' : 'sun'} size={20} stroke={1.8} className="text-moon" />
+            <span className="text-lg font-semibold">{world.clock} {t.phase[world.phase]}</span>
+          </Chip>
+        )}
+        <Chip className="gap-2">
+          <span className={cx('size-2.5 rounded-full', LINK_DOT[link])} />
+          <span className={cx('text-[15px]', link === 'stale' ? 'text-accent' : 'text-ink-2')}>{t.link[link]}</span>
+        </Chip>
+      </div>
+    </header>
+  );
+}
+
+function Chip({ className, children }: { className?: string; children: ReactNode }) {
+  return <div className={cx('flex items-center gap-2.5 rounded-xl border border-line bg-surface/90 px-4 py-3 shadow-[inset_0_1px_0_rgb(230_204_143/0.07)]', className)}>{children}</div>;
+}
+
+/* ------------------------------- monster pane ------------------------------- */
+
+// Everything about one monster in one frame, used when the quest has 2–3 monsters side by side.
+// The one you hit last gets a gold frame.
+function MonsterPane({ m, phys, selected, ringZoom, fitContent }: { m: Monster; phys: PhysType | null; selected: boolean; ringZoom: number; fitContent?: boolean }) {
+  const state = hpState(m);
+  const done = state === 'done';
+  const info = monsterInfo(m);
+  const broken = m.parts.filter((p) => p.broken).length;
+  return (
+    <Panel className={cx('flex min-h-0 min-w-0 flex-col gap-3 p-4', fitContent ? 'flex-auto' : 'flex-1', selected && 'border-gold! shadow-[0_0_20px_rgb(200_169_106/0.2)]', done && 'opacity-70')}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className={cx('flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 bg-avatar',
+            done ? 'border-disabled text-disabled' : 'border-gold text-gold')}>
+            <Icon name="claw" size={24} />
+          </div>
+          <div className="min-w-0">
+            <div className={cx('truncate font-display text-[24px] leading-[1.15] font-bold', selected && 'text-gold-hi')}>{m.name}</div>
+            {info && <div className="truncate text-[12px] text-muted" title={t.dataCredit}>{[info.type, info.habitat.join(', ')].filter(Boolean).join(' · ')}</div>}
+          </div>
+        </div>
+        {m.enraged && !done && <EnrageBadge remainSec={m.enrageRemainSec} />}
+      </div>
+
+      <div className="flex items-center gap-3">
+        <div className="shrink-0" style={{ zoom: ringZoom }}><HpRing m={m} state={state} /></div>
+        <div className="flex min-w-0 flex-1 flex-col gap-2">
+          {state === 'capture' && <CaptureBanner />}
+          {done && <div className="rounded-xl border border-line bg-surface-2 p-2.5 text-center text-lg font-bold text-ink-2">{t.done}</div>}
+          {!done && <WeakStrip hitzones={m.hitzones} phys={phys} info={info} />}
+          <div className="flex gap-2 text-[13px] text-muted">
+            {m.wounds != null && <span className="rounded-lg bg-surface-2 px-2.5 py-1.5">{t.wounds} <b className="text-[17px] text-danger-ink">{m.wounds}</b></span>}
+            {m.parts.length > 0 && <span className="rounded-lg bg-surface-2 px-2.5 py-1.5">{t.breaks} <b className="text-[17px] text-info-soft">{broken}/{m.parts.length}</b></span>}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid min-h-0 flex-1 grid-cols-2 gap-3">
+        <PartsPanel monster={m} phys={phys} bare />
+        <AilmentsPanel ailments={m.ailments} bare />
+      </div>
+    </Panel>
+  );
+}
+
+/* ------------------------------- monster card ------------------------------- */
+
+function MonsterCard({ monster: m, ringZoom, phys }: { monster: Monster | null; ringZoom: number; phys: PhysType | null }) {
+  if (!m) return <Panel className="flex items-center justify-center p-6 text-[21px] text-muted">{t.noMonster}</Panel>;
+  const state = hpState(m);
+  const done = state === 'done';
+  const broken = m.parts.filter((p) => p.broken).length;
+  const sizeLine = [m.sizePct != null && t.size(m.sizePct), m.crown && t.crown[m.crown]].filter(Boolean).join(' · ');
+  const info = monsterInfo(m);
+  const raw = m.scars.filter((s) => s.state === 'raw').length;
+  const tear = m.scars.filter((s) => s.state === 'tear').length;
+
+  return (
+    <Panel className="flex min-h-0 flex-col gap-4 p-6">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3.5">
+          <div className={cx('flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-full border-2 bg-avatar',
+            done ? 'border-disabled text-disabled' : 'border-gold text-gold shadow-[0_0_14px_rgb(200_169_106/0.25)]')}>
+            <Icon name="claw" size={30} />
+          </div>
+          <div className="min-w-0">
+            <div className="truncate font-display text-[30px] leading-[1.15] font-bold">{m.name}</div>
+            {sizeLine && (
+              <div className="flex items-center gap-1.5 text-[15px] text-crown">
+                {m.crown && <Icon name="crown" size={16} />}
+                <span className="truncate">{sizeLine}</span>
+              </div>
+            )}
+            {info && (
+              <div className="truncate text-[13px] text-muted" title={t.dataCredit}>{[info.type, info.habitat.join(', ')].filter(Boolean).join(' · ')}</div>
+            )}
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-2">
+          {m.enraged && !done && <EnrageBadge remainSec={m.enrageRemainSec} />}
+        </div>
+      </div>
+
+      <div className="self-center" style={{ zoom: ringZoom }}><HpRing m={m} state={state} /></div>
+
+      {state === 'capture' && <CaptureBanner />}
+      {done && (
+        <div className="flex items-center justify-center gap-2.5 rounded-xl border border-line bg-surface-2 p-[13px] text-[21px] font-bold text-ink-2">
+          <Icon name="check" size={24} stroke={2.2} />
+          <span>{t.done}</span>
+        </div>
+      )}
+
+      {!done && <WeakStrip hitzones={m.hitzones} phys={phys} info={info} />}
+
+      <div className="mt-auto flex flex-wrap gap-2 text-[13px] text-muted">
+        {m.wounds != null && (
+          <span className="rounded-lg bg-surface-2 px-3 py-2">
+            {t.wounds} <b className="text-xl text-danger-ink">{m.wounds}</b>
+            {raw + tear > 0 && <span className="ml-1.5 text-danger-ink/80">({[raw > 0 && `${t.scar.raw} ${raw}`, tear > 0 && `${t.scar.tear} ${tear}`].filter(Boolean).join(' · ')})</span>}
+          </span>
+        )}
+        {m.parts.length > 0 && <span className="rounded-lg bg-surface-2 px-3 py-2">{t.breaks} <b className="text-xl text-info-soft">{broken} / {m.parts.length}</b></span>}
+      </div>
+    </Panel>
+  );
+}
+
+const RING_R = 130;
+const RING_C = 2 * Math.PI * RING_R;
+const ZONE_R = 149; // thin outer arc marking the capture zone
+const ZONE_C = 2 * Math.PI * ZONE_R;
+
+function HpRing({ m, state }: { m: Monster; state: ReturnType<typeof hpState> }) {
+  const r = ratio(m.hp, m.hpMax);
+  const color = state === 'done' ? '#8A7C66' : state === 'capture' ? '#F2A541' : '#5AA9E6';
+  const th = m.captureThreshold;
+  const a = (th ?? 0) * 2 * Math.PI; // clockwise from 12 o'clock
+  return (
+    <div className="relative size-[304px] shrink-0 self-center">
+      <svg width="304" height="304" viewBox="-2 -2 304 304" className="absolute inset-0 -rotate-90 overflow-visible">
+        <circle cx="150" cy="150" r={RING_R} fill="none" stroke="#2A2219" strokeWidth="24" />
+        {th != null && state !== 'done' && (
+          <circle cx="150" cy="150" r={ZONE_R} fill="none" stroke="#F2A541" strokeOpacity={state === 'capture' ? 0.9 : 0.4} strokeWidth="4"
+            strokeLinecap="round" strokeDasharray={`${ZONE_C * th} ${ZONE_C}`} />
+        )}
+        {r > 0 && (
+          <circle cx="150" cy="150" r={RING_R} fill="none" stroke={color} strokeWidth="24" strokeLinecap="round"
+            strokeDasharray={`${RING_C * r} ${RING_C}`}
+            style={{
+              transition: 'stroke-dasharray 250ms ease-out, stroke 250ms ease-out',
+              filter: state === 'capture' ? 'drop-shadow(0 0 10px rgb(242 165 65 / 0.55))' : 'drop-shadow(0 0 6px rgb(90 169 230 / 0.25))',
+            }} />
+        )}
+      </svg>
+      {th != null && state !== 'done' && (
+        <svg width="304" height="304" viewBox="-2 -2 304 304" className="absolute inset-0 overflow-visible">
+          <line x1={150 + 112 * Math.sin(a)} y1={150 - 112 * Math.cos(a)} x2={150 + 153 * Math.sin(a)} y2={150 - 153 * Math.cos(a)}
+            stroke="#E8E6E1" strokeWidth="3" strokeLinecap="round" />
+        </svg>
+      )}
+      <div className="absolute inset-0 flex flex-col items-center justify-center gap-1">
+        <div className="text-[13px] tracking-[3px] text-muted">HP</div>
+        <div className={cx('text-[92px] leading-[0.95] font-bold', state === 'done' && 'text-disabled', state === 'capture' && 'text-accent')}>
+          {pct(m.hp, m.hpMax)}<span className="text-[40px]">%</span>
+        </div>
+        <div className="text-[15px] text-muted">{fmtInt(Math.max(0, m.hp))} / {fmtInt(m.hpMax)}</div>
+      </div>
+    </div>
+  );
+}
+
+function WeakStrip({ hitzones, phys, info }: { hitzones: Hitzone[]; phys: PhysType | null; info: MonsterInfo | null }) {
+  const spots = weakSpots(hitzones, phys);
+  // live hitzone values from the game; site stars (0–3) only when the game gave none
+  const els: { el: string; label: string }[] = hitzones.length
+    ? elementRank(hitzones).slice(0, 3).map((e) => ({ el: e.el, label: String(e.value) }))
+    : elementStars(info).slice(0, 3).map((e) => ({ el: e.el, label: '★'.repeat(e.stars) }));
+  if (spots.length === 0 && els.length === 0) return null;
+  return (
+    <div className="grid grid-cols-[64px_1fr] items-center gap-x-3 gap-y-2 rounded-xl border border-line/70 bg-surface-2/80 px-3.5 py-3">
+      {spots.length > 0 && <span className="text-[13px] text-muted">{t.weakTitle}</span>}
+      {spots.length > 0 && (
+        <div className="flex min-w-0 flex-wrap gap-1.5">
+          {spots.map((s, i) => (
+            <span key={s.name} className={cx('flex min-w-0 items-center gap-1.5 rounded-lg px-2.5 py-1 text-[15px] font-semibold',
+              i === 0 ? 'bg-info-bg text-info-soft' : 'bg-track text-ink-2')}>
+              <span className="truncate">{s.name}</span>
+              <span className={cx('shrink-0', s.value >= WEAK_HITZONE ? 'font-bold' : 'text-muted')}>{s.value}</span>
+            </span>
+          ))}
+        </div>
+      )}
+      {els.length > 0 && <span className="text-[13px] text-muted">{t.elementTitle}</span>}
+      {els.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {els.map((e) => {
+            return (
+              <span key={e.el} className="flex items-center gap-1.5 rounded-lg bg-track px-2.5 py-1 text-[15px] font-semibold" style={{ color: ELEMENT_COLORS[e.el] }}>
+                <Icon name={iconFor(e.el)} size={16} />
+                {t.element[e.el]} <span className="text-ink">{e.label}</span>
+              </span>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EnrageBadge({ remainSec }: { remainSec?: number | null }) {
+  return (
+    <div className="flex animate-enrage-in items-center gap-2 rounded-xl border border-danger bg-danger-bg px-3 py-2 text-danger-ink">
+      <Icon name="flame" size={22} />
+      <div className="flex flex-col leading-[1.1]">
+        <span className="text-[13px]">{t.enraged}</span>
+        {remainSec != null && <span className="text-xl font-bold">{mmss(remainSec)}</span>}
+      </div>
+    </div>
+  );
+}
+
+function CaptureBanner() {
+  return (
+    <div className="flex animate-capture-in items-center justify-center gap-2.5 rounded-xl bg-accent p-[13px] text-[21px] font-bold text-on-accent">
+      <Icon name="target" size={24} stroke={2.2} />
+      <span>{t.capture}</span>
+    </div>
+  );
+}
+
+/* ------------------------------ "do this now" ------------------------------ */
+
+function NowPanel({ items, cols = 4, done }: { items: Callout[]; cols?: 2 | 4; done?: ReactNode }) {
+  return (
+    <Panel className="flex shrink-0 flex-col gap-3 px-5 py-4">
+      <Eyebrow icon="alert" right={done}>{t.nowTitle}</Eyebrow>
+      <div className={cx('grid gap-2.5', cols === 2 ? 'grid-cols-2' : 'grid-cols-4')}>
+        {items.length === 0 && (
+          <div className="col-span-full flex h-16 items-center justify-center rounded-xl border border-dashed border-line text-[17px] text-muted">
+            {t.nowEmpty}
+          </div>
+        )}
+        {items.map((c, i) => <CalloutTile key={`${c.kind}-${'id' in c ? c.id : 'name' in c ? c.name : i}`} c={c} />)}
+      </div>
+    </Panel>
+  );
+}
+
+function CalloutTile({ c }: { c: Callout }) {
+  let icon: IconName = 'alert', title = '', detail = '', time: number | null | undefined;
+  let className = '', style: CSSProperties | undefined, timeClass = '';
+  switch (c.kind) {
+    case 'capture':
+      [title, detail] = t.now.capture; icon = 'target';
+      className = 'animate-capture-in bg-accent border-accent text-on-accent';
+      break;
+    case 'ailment': {
+      const [color, bg] = ailColors(c.id);
+      title = t.ailment[c.id] ?? c.id; detail = t.now.ailment; icon = iconFor(c.id, 'star'); time = c.remainSec;
+      style = { background: bg, borderColor: color, color };
+      className = 'animate-enrage-in border-l-4';
+      break;
+    }
+    case 'enrage':
+      [title, detail] = t.now.enrage; icon = 'flame'; time = c.remainSec;
+      className = 'animate-enrage-in bg-danger-bg border-danger text-danger-ink';
+      break;
+    case 'part':
+      [title, detail] = t.now.part(c.name, c.remain); icon = 'hammer';
+      className = 'bg-accent-bg border-accent-line text-accent';
+      break;
+    case 'buff':
+      [title, detail] = t.now.buff(c.name); icon = 'flask'; time = c.remainSec;
+      className = 'bg-accent-warn border-accent-line text-accent';
+      break;
+    case 'buildup': {
+      const [color, bg] = ailColors(c.id);
+      [title, detail] = t.now.buildup(t.ailment[c.id] ?? c.id, c.pct); icon = iconFor(c.id, 'star');
+      style = { background: bg, borderColor: `${color}55`, color };
+      timeClass = 'hidden';
+      break;
+    }
+  }
+  return (
+    <div className={cx('flex h-16 min-w-0 items-center gap-3 rounded-xl border px-3.5', className)} style={style}>
+      <Icon name={icon} size={26} stroke={2.2} className="shrink-0" />
+      <div className="flex min-w-0 flex-1 flex-col leading-tight">
+        <span className="truncate text-[19px] font-bold">{c.who ? `${c.who} · ${title}` : title}</span>
+        <span className="truncate text-[13px] opacity-80">{detail}</span>
+      </div>
+      {time != null && <span className={cx('shrink-0 text-[26px] font-bold', timeClass)}>{mmss(time)}</span>}
+    </div>
+  );
+}
+
+/* ----------------------------------- parts ---------------------------------- */
+
+function PartsPanel({ monster, phys, bare }: { monster: Monster | null; phys: PhysType | null; bare?: boolean }) {
+  const parts = monster ? partViews(monster.parts) : [];
+  const zones = new Map(monster?.hitzones.map((h) => [h.id, physValue(h, phys)]));
+  const scars = new Map(monster?.scars.map((s) => [s.partId, s]));
+
+  // FLIP reorder (spec §8): remember each row's top, animate from the old spot.
+  const rows = useRef(new Map<string, HTMLElement>());
+  const tops = useRef(new Map<string, number>());
+  useLayoutEffect(() => {
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    rows.current.forEach((el, id) => {
+      const top = el.offsetTop;
+      const old = tops.current.get(id);
+      if (!reduce && old != null && old !== top) {
+        el.animate([{ transform: `translateY(${old - top}px)` }, { transform: 'none' }], { duration: 250, easing: 'ease-in-out' });
+      }
+      tops.current.set(id, top);
+    });
+  });
+
+  const body = (
+    <>
+      <Eyebrow icon="hammer" right={!bare && <span className="text-sm text-muted">{t.partsSort}</span>}>{t.partsTitle}</Eyebrow>
+      {parts.length === 0 && <div className="py-6 text-center text-[17px] text-muted">{t.noParts}</div>}
+      <div className="relative -mx-1 flex min-h-0 flex-col gap-2.5 overflow-y-auto px-1">
+        {parts.map((p) => (
+          <PartRow key={p.id} p={p} hitzone={zones.get(p.id)} scar={scars.get(p.id)} compact={bare}
+            rowRef={(el) => { if (el) rows.current.set(p.id, el); else rows.current.delete(p.id); }} />
+        ))}
+      </div>
+    </>
+  );
+  return bare
+    ? <div className="flex min-h-0 min-w-0 flex-col gap-2.5">{body}</div>
+    : <Panel className="flex min-h-0 flex-1 flex-col gap-3 px-6 py-5">{body}</Panel>;
+}
+
+const PART_STYLE = {
+  normal: { row: 'bg-surface-2 border-surface-2', tile: 'bg-info-bg text-info-soft', label: 'text-ink', bar: '#5AA9E6' },
+  near: { row: 'bg-accent-bg border-accent-line', tile: 'bg-accent-tile text-accent', label: 'text-accent', bar: '#F2A541' },
+  broken: { row: 'bg-surface-2/60 border-transparent', tile: 'bg-track text-disabled', label: 'text-disabled', bar: '#5AA9E6' },
+};
+
+function PartRow({ p, hitzone, scar, compact, rowRef }: { p: PartView; hitzone?: number; scar?: Scar; compact?: boolean; rowRef: (el: HTMLElement | null) => void }) {
+  const s = PART_STYLE[p.variant];
+  const wasBroken = useRef(p.broken);
+  const [flash, setFlash] = useState(false);
+  useEffect(() => {
+    if (p.broken && !wasBroken.current) setFlash(true);
+    wasBroken.current = p.broken;
+  }, [p.broken]);
+
+  const label = p.variant === 'broken' ? t.partBroken : p.variant === 'near' ? t.partLeft(p.remain) : `${p.remain}%`;
+  return (
+    <div ref={rowRef} onAnimationEnd={() => setFlash(false)}
+      className={cx('flex shrink-0 items-center rounded-[14px] border', compact ? 'gap-2.5 px-3 py-2' : 'gap-4 px-4 py-3', s.row, flash && 'animate-break-flash')}>
+      <Tile icon={p.broken ? 'check' : iconFor(p.kind, 'claw')} size={compact ? 32 : 42} className={s.tile} />
+      <div className="flex min-w-0 flex-1 flex-col gap-2">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className={cx('min-w-12 truncate font-semibold', compact ? 'text-[17px]' : 'text-[21px]', p.broken && 'text-disabled')}>{p.name}</span>
+            {/* narrow panes: icon-only chips so the part name keeps its room */}
+            {scar && !p.broken && (
+              <span title={t.scar[scar.state]} className="shrink-0 rounded-md bg-danger-bg px-1.5 py-0.5 text-xs font-semibold text-danger-ink">
+                {compact ? <Icon name="wound" size={12} stroke={2.4} /> : t.scar[scar.state]}
+              </span>
+            )}
+            {hitzone != null && hitzone >= WEAK_HITZONE && !p.broken && (
+              <span className="shrink-0 rounded-md bg-info-bg px-1.5 py-0.5 text-xs font-semibold text-info-soft">★{compact ? '' : ` ${hitzone}`}</span>
+            )}
+          </div>
+          <span className={cx('shrink-0 text-[17px] font-semibold', s.label)}>{label}</span>
+        </div>
+        <Bar value={p.broken ? 0 : p.remain / 100} color={s.bar} />
+      </div>
+    </div>
+  );
+}
+
+/* --------------------------------- ailments --------------------------------- */
+
+function AilmentsPanel({ ailments, bare }: { ailments: Ailment[]; bare?: boolean }) {
+  // active first (they're the ones to act on), then closest to triggering
+  const sorted = [...ailments].sort((a, b) => Number(!!b.active) - Number(!!a.active) || b.buildup - a.buildup);
+  const body = (
+    <>
+      <Eyebrow icon="bolt">{t.ailmentsTitle}</Eyebrow>
+      {sorted.length === 0 && <div className="text-[15px] text-muted">{t.noAilments}</div>}
+      <div className="-mx-1 flex min-h-0 flex-col gap-2.5 overflow-y-auto px-1">
+        {sorted.map((a) => <AilmentRow key={a.id} a={a} />)}
+      </div>
+    </>
+  );
+  return bare
+    ? <div className="flex min-h-0 min-w-0 flex-col gap-2.5">{body}</div>
+    : <Panel className="flex min-h-0 flex-col gap-3 px-[22px] py-5">{body}</Panel>;
+}
+
+function AilmentRow({ a }: { a: Ailment }) {
+  const [color, bg] = ailColors(a.id);
+  const p = pct(a.buildup, 1);
+  const hot = p >= 75;
+  return (
+    <div className={cx('flex shrink-0 items-center gap-3 rounded-xl', a.active && 'border px-2.5 py-2')}
+      style={a.active ? { background: bg, borderColor: color } : undefined}>
+      <Tile icon={iconFor(a.id, 'star')} size={36} className="rounded-[10px]" style={{ background: bg, color }} />
+      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+        <div className="flex items-baseline justify-between gap-2">
+          <span className="truncate text-[17px] font-semibold" style={a.active ? { color } : undefined}>{t.ailment[a.id] ?? a.id}</span>
+          {a.active ? (
+            <span className="shrink-0 text-[15px] font-bold" style={{ color }}>
+              {t.ailmentActive}{a.remainSec != null && <span className="ml-1.5 text-xl">{mmss(a.remainSec)}</span>}
+            </span>
+          ) : (
+            <span className="shrink-0 text-sm text-muted">
+              ×{a.procs} · <b className={hot ? 'font-bold' : 'font-semibold text-ink'} style={hot ? { color } : undefined}>{p}%</b>
+            </span>
+          )}
+        </div>
+        {!a.active && <Bar value={p / 100} color={color} h={8} />}
+      </div>
+    </div>
+  );
+}
+
+/* ----------------------------------- buffs ---------------------------------- */
+
+const BUFF_STYLE = {
+  normal: { card: 'bg-surface-2 border-surface-2', icon: 'text-buff', time: 'text-ink' },
+  infinite: { card: 'bg-surface-2 border-surface-2', icon: 'text-buff', time: 'text-ink' },
+  warn: { card: 'bg-accent-warn border-accent-line', icon: 'text-accent', time: 'text-accent' },
+};
+
+function BuffsPanel({ snap }: { snap: Snapshot }) {
+  const buffs = buffViews(snap.player.buffs);
+  return (
+    <Panel className="flex min-h-0 flex-1 flex-col gap-2 px-5 py-3.5">
+      <Eyebrow icon="shield">{t.buffsTitle}</Eyebrow>
+      {buffs.length === 0 && <div className="text-[15px] text-muted">{t.noBuffs}</div>}
+      <div className="grid min-h-0 grid-cols-[repeat(auto-fill,minmax(180px,1fr))] content-start gap-2 overflow-y-auto">
+        {buffs.map((b) => {
+          const s = BUFF_STYLE[b.variant];
+          return (
+            // one line: icon · name · time — four fit in two rows of the bottom player block
+            <div key={b.id} className={cx('flex h-11 min-w-0 items-center gap-2.5 rounded-xl border px-3', s.card)}>
+              <Icon name={iconFor(b.id, 'flask')} size={18} className={cx('shrink-0', s.icon)} />
+              <span className="min-w-0 flex-1 truncate text-sm text-ink-2">{b.name}</span>
+              <span className={cx('shrink-0 text-[22px] leading-none font-bold', s.time)}>{b.remainSec == null ? '∞' : mmss(b.remainSec)}</span>
+            </div>
+          );
+        })}
+      </div>
+    </Panel>
+  );
+}
+
+/* ------------------------------- damage meter ------------------------------- */
+
+function DamageMeter({ members, dps }: ReturnType<typeof partyViews>) {
+  let other = 0;
+  return (
+    // one row per hunter: name | bar | damage · %  (fits both the bottom row and the right column)
+    <Panel className="flex min-h-0 flex-1 flex-col gap-2 px-5 py-3.5">
+      <Eyebrow icon="sword" right={<span className="shrink-0 text-[15px] text-ink-2">DPS <b className="text-ink">{dps.toFixed(1)}</b></span>}>{t.damageTitle}</Eyebrow>
+      {members.length === 0 && <div className="text-[15px] text-muted">{t.noDamage}</div>}
+      <div className="flex min-h-0 flex-col justify-center gap-1.5 overflow-y-auto">
+        {members.map((m, i) => {
+          const color = m.self ? '#F2A541' : PARTY_COLORS[other++ % PARTY_COLORS.length];
+          return (
+            <div key={`${m.name}-${i}`} className="grid grid-cols-[minmax(0,110px)_minmax(0,1fr)_auto] items-center gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="size-2.5 shrink-0 rounded-full" style={{ background: color }} />
+                <span className={cx('truncate text-[15px] font-semibold', m.self && 'text-accent')}>{m.name}</span>
+              </div>
+              <Bar value={m.pct / 100} color={color} h={8} />
+              <span className="text-right text-sm text-muted">{fmtInt(m.damage)} · <b className="text-ink">{m.pct}%</b></span>
+            </div>
+          );
+        })}
+      </div>
+    </Panel>
+  );
+}
+
+/* ------------------------------- dev: mock bar ------------------------------ */
+
+function MockSwitcher() {
+  const names = ['connecting', 'stale', ...Object.keys(mocks)];
+  return (
+    <nav className="fixed top-1 left-1/2 flex -translate-x-1/2 flex-wrap gap-1 rounded-lg border border-line bg-surface/95 p-1.5 text-xs opacity-20 transition-opacity hover:opacity-100">
+      {names.map((n) => (
+        <a key={n} href={`?mock=${n}`}
+          className={cx('rounded px-2 py-1 no-underline', n === mockName ? 'bg-accent text-on-accent' : 'text-ink-2 hover:bg-surface-2')}>
+          {n}
+        </a>
+      ))}
+    </nav>
+  );
+}

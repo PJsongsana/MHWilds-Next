@@ -1,0 +1,38 @@
+# MH Wilds Hunt Dashboard
+
+Second-screen dashboard for Monster Hunter Wilds (spec: [HANDOFF.md](HANDOFF.md), mockup: [Main.dc.html](Main.dc.html)).
+
+```
+[MH Wilds + REFramework] lua/…/hunt_dashboard.lua → reframework/data/hunt_dashboard.json (every 200ms, read-only)
+        ↓ bridge/server.js polls the file
+[ws://127.0.0.1:8787] → [Vite + React + Tailwind UI]
+```
+
+## Run
+
+```bash
+npm install
+npm run install-lua   # copies the Lua script into <game>/reframework/autorun (needs _CatLib, comes with MHWilds Overlay)
+npm run dev           # UI on http://127.0.0.1:5173 + bridge on ws://127.0.0.1:8787
+```
+
+Open the page on the second monitor and press F11. After editing Lua in game: REFramework menu → ScriptRunner → Reset scripts.
+
+Game folder is found from Steam's `libraryfolders.vdf`; override with `MHW_GAME_DIR`.
+
+## Without the game
+
+- Mock states: `http://127.0.0.1:5173/?mock=capture` (bar at the top lists all states)
+- Record a real hunt: `npm run bridge -- --record hunt.jsonl` (with `BRIDGE=off npm run dev`)
+- Replay it: `npm run bridge -- --replay hunt.jsonl`
+
+## Layout
+
+- `lua/reframework/autorun/hunt_dashboard/game_reader.lua` — the only file that knows game field names
+- `bridge/` — file → WebSocket, localhost only, offline after 3s without updates
+- `src/logic.ts` — data contract + all derived values (`npm test`)
+- `src/App.tsx` — UI · `src/strings.ts` — text · `src/icons.tsx` — icons · `src/mocks.ts` — mock states
+
+## Credits
+
+Monster type / habitat / element weakness stars (`src/data/monsters.json`, `npm run fetch-monster-data`) come from [mh-wilds.kerlos.in.th](https://mh-wilds.kerlos.in.th/monster) by keRLos. Live hitzones are read from the game.

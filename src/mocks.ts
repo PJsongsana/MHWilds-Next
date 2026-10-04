@@ -30,7 +30,7 @@ const reyDau: Monster = {
   ],
   scars: [
     { part: 'หัว', partId: 'head', state: 'raw' },
-    { part: 'ขาหน้า', partId: 'leg_f', state: 'normal' },
+    { part: 'ขาหน้า', partId: 'leg_f', state: 'tear' },
     { part: 'หาง', partId: 'tail', state: 'tear', legendary: true },
   ],
 };

@@ -44,7 +44,7 @@ export const t = {
   weakTitle: 'จุดอ่อน',
   elementTitle: 'ธาตุ',
   element: { fire: 'ไฟ', water: 'น้ำ', thunder: 'สายฟ้า', ice: 'น้ำแข็ง', dragon: 'มังกร' } as Record<string, string>,
-  scar: { normal: 'แผล', tear: 'แผลฉีก', raw: 'แผลสด' } as Record<string, string>,
+  scar: { tear: 'แผล', raw: 'แผลสด' } as Record<string, string>,
   questRemain: (s: string) => `เหลือ ${s}`,
   dataCredit: 'ข้อมูลมอน: mh-wilds.kerlos.in.th · keRLos',
   buffsTitle: 'บัฟของเรา',

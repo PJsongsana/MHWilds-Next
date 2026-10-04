@@ -41,6 +41,16 @@ local function safe(fn, ...)
     return nil
 end
 
+-- Like safe(), but remembers the first error per tag; the snapshot carries them as `errors`
+-- so a recording (npm run bridge -- --record) shows *why* a field is missing after a game update.
+local errors = {}
+local function try(tag, fn, ...)
+    local ok, v = pcall(fn, ...)
+    if ok then return v end
+    if errors[tag] == nil then errors[tag] = tostring(v):sub(1, 200) end
+    return nil
+end
+
 ---------------------------------------------------------------------------
 -- Damage meter: the hook only reads the hit (same hook MHWilds Overlay uses).
 -- ponytail: counts hits seen on this machine; remote players' totals may be
@@ -150,7 +160,7 @@ local function readParts(ctx, emID, m)
     local brk = breakable(parts)
     Core.ForEach(parts._DmgParts, function(part, i)
         local pi = info[i] or { name = "Part " .. i, kind = "other" }
-        local meat = safe(partMeat, params, part, i)
+        local meat = try("hitzones", partMeat, params, part, i)
         if meat then
             meat.id, meat.name, meat.kind = tostring(i), pi.name, pi.kind
             table.insert(m.hitzones, meat)
@@ -170,7 +180,7 @@ end
 
 local readCondition -- one condition; errors are isolated so a bad one doesn't hide the rest
 local function readConditions(ctx, m)
-    Core.ForEach(ctx.Conditions._Conditions, function(cond) pcall(readCondition, cond, m) end)
+    Core.ForEach(ctx.Conditions._Conditions, function(cond) try("condition", readCondition, cond, m) end)
 end
 
 readCondition = function(cond, m)
@@ -206,7 +216,9 @@ readCondition = function(cond, m)
     end
 end
 
-local SCAR_STATE = { [0] = "normal", [1] = "tear", [2] = "raw" } -- other states = healed/none (Overlay boss/draw.lua)
+-- app.cEmModuleScar.cScarParts.STATE (Enums_Internal.hpp): NONE -1, NORMAL 0, TEAR 1, RAW 2, OLD 3, HEAL 4.
+-- Only TEAR/RAW are open wounds: a recording showed ~20 slots per monster sitting in NORMAL from quest start.
+local SCAR_STATE = { [1] = "tear", [2] = "raw" }
 local function readScars(ctx, emID)
     local out = {}
     local info = partInfo(ctx, emID)
@@ -239,7 +251,7 @@ local EnemyNameGuid = sdk.find_type_definition("app.EnemyDef"):get_method("Enemy
 local nameEnCache = {}
 local function nameEn(emID)
     if nameEnCache[emID] == nil then
-        nameEnCache[emID] = safe(function() return Core.GetLocalizedText(EnemyNameGuid:call(nil, emID), 1) end) or false
+        nameEnCache[emID] = try("nameEn", function() return Core.GetLocalizedText(EnemyNameGuid:call(nil, emID), 1) end) or false
     end
     return nameEnCache[emID] or nil
 end
@@ -263,7 +275,7 @@ local function readMonster(enemy)
     if type(rate) == "number" and rate > 0 and rate < 1 then m.captureThreshold = rate end
     m.crown = CROWNS[safe(function() return ctx:get_Browser():checkCrownType() end) or 0]
     m.sizePct = safe(sizePct, ctx)
-    m.scars = safe(readScars, ctx, emID)
+    m.scars = try("scars", readScars, ctx, emID)
     m.wounds = m.scars and #m.scars or nil
     safe(readParts, ctx, emID, m)
     safe(readConditions, ctx, m)
@@ -313,11 +325,15 @@ function M.snapshot()
     if not active then
         snap.quest = { active = false, elapsedSec = 0, limitSec = 0 }
     else
+        -- getActiveTimeLimit() is in MINUTES (a recording showed 50 for a 50-minute quest);
+        -- elapsed is in seconds, so remaining time is computed here instead of trusting another getter.
+        local elapsed = Core.GetQuestElapsedTime()
+        local limitSec = (Core.GetQuestTimeLimit() or 0) * 60
         snap.quest = {
             active = true,
-            elapsedSec = Core.GetQuestElapsedTime(),
-            limitSec = Core.GetQuestTimeLimit(),
-            remainSec = safe(Core.GetQuestRemainTime),
+            elapsedSec = elapsed,
+            limitSec = limitSec,
+            remainSec = limitSec > 0 and math.max(0, limitSec - elapsed) or nil,
         }
         local now = Core.GetTime() -- via.Application uptime seconds
         if now - bossesAt > 5 then
@@ -325,21 +341,22 @@ function M.snapshot()
             bossesAt = now
         end
         for _, enemy in ipairs(bosses) do
-            local m = safe(readMonster, enemy)
+            local m = try("monster", readMonster, enemy)
             if m then table.insert(snap.monsters, m) end
         end
         snap.targetId = selfTarget
     end
 
     -- weapon type name decides which hitzone (slash/blow/shot) the UI ranks weak spots by.
-    -- ponytail: enum name "app.WeaponDef.TYPE" unverified; nil → UI uses the best of the three
+    -- app.WeaponDef.TYPE names (Enums_Internal.hpp): LONG_SWORD, HAMMER, WHISTLE, GUN_LANCE, BOW, …; nil → UI uses the best of the three
     snap.player = {
-        buffs = safe(readBuffs) or {},
-        weapon = safe(function() return WeaponNames[Core.GetPlayerWeaponType()] end),
+        buffs = try("buffs", readBuffs) or {},
+        weapon = try("weapon", function() return WeaponNames[Core.GetPlayerWeaponType()] end),
     }
     for _, rec in pairs(damage) do
         table.insert(snap.party, { name = rec.name, self = rec.self, damage = math.floor(rec.damage) })
     end
+    if next(errors) then snap.errors = errors end
     return snap
 end
 

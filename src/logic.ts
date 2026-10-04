@@ -12,7 +12,7 @@ export type Element = (typeof ELEMENTS)[number];
 export type PhysType = 'slash' | 'blow' | 'shot';
 /** Live hitzone values of one damage part (change when the part breaks / is wounded). */
 export type Hitzone = { id: string; name: string; kind: string } & Record<PhysType | Element, number>;
-export interface Scar { part?: string | null; partId?: string; state: 'normal' | 'tear' | 'raw'; legendary?: boolean; ride?: boolean }
+export interface Scar { part?: string | null; partId?: string; state: 'tear' | 'raw'; legendary?: boolean; ride?: boolean }
 export interface Monster {
   id: string; name: string; hp: number; hpMax: number;
   nameEn?: string | null; // English name (any game language) — key into data/monsters.json

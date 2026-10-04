@@ -1,0 +1,494 @@
+{
+ "source": "https://mh-wilds.kerlos.in.th/monster",
+ "credit": "keRLos",
+ "fetchedAt": "2026-10-04T04:14:26.143Z",
+ "monsters": [
+  {
+   "name": "Chatacabra",
+   "type": "Amphibian",
+   "habitat": [
+    "Windward Plains"
+   ],
+   "chapter": "1",
+   "weakness": {
+    "fire": 1,
+    "water": 1,
+    "thunder": 2,
+    "ice": 1,
+    "dragon": 0
+   }
+  },
+  {
+   "name": "Quematrice",
+   "type": "Brute Wyvern",
+   "habitat": [
+    "Windward Plains",
+    "Ruins of Wyveria"
+   ],
+   "chapter": "1",
+   "weakness": {
+    "fire": 0,
+    "water": 1,
+    "thunder": 1,
+    "ice": 1,
+    "dragon": 1
+   }
+  },
+  {
+   "name": "Lala Barina",
+   "type": "Temnoceran",
+   "habitat": [
+    "Scarlet Forest"
+   ],
+   "chapter": "1",
+   "weakness": {
+    "fire": 2,
+    "water": 0,
+    "thunder": 1,
+    "ice": 1,
+    "dragon": 0
+   }
+  },
+  {
+   "name": "Congalala",
+   "type": "Fanged Beast",
+   "habitat": [
+    "Scarlet Forest",
+    "Ruins of Wyveria"
+   ],
+   "chapter": "1",
+   "weakness": {
+    "fire": 1,
+    "water": 1,
+    "thunder": 1,
+    "ice": 1,
+    "dragon": 1
+   }
+  },
+  {
+   "name": "Balahara",
+   "type": "Leviathan",
+   "habitat": [
+    "Windward Plains"
+   ],
+   "chapter": "1",
+   "weakness": {
+    "fire": 1,
+    "water": 0,
+    "thunder": 2,
+    "ice": 1,
+    "dragon": 1
+   }
+  },
+  {
+   "name": "Doshaguma",
+   "type": "Fanged Beast",
+   "habitat": [
+    "Windward Plains"
+   ],
+   "chapter": "1",
+   "weakness": {
+    "fire": 2,
+    "water": 1,
+    "thunder": 1,
+    "ice": 1,
+    "dragon": 1
+   }
+  },
+  {
+   "name": "Uth Duna",
+   "type": "Leviathan",
+   "habitat": [
+    "Scarlet Forest"
+   ],
+   "chapter": "1",
+   "weakness": {
+    "fire": 1,
+    "water": 0,
+    "thunder": 1,
+    "ice": 1,
+    "dragon": 1
+   }
+  },
+  {
+   "name": "Rompopolo",
+   "type": "Brute Wyvern",
+   "habitat": [
+    "Oilwell Basin"
+   ],
+   "chapter": "2",
+   "weakness": {
+    "fire": 1,
+    "water": 2,
+    "thunder": 1,
+    "ice": 1,
+    "dragon": 1
+   }
+  },
+  {
+   "name": "Rey Dau",
+   "type": "Flying Wyvern",
+   "habitat": [
+    "Windward Plains"
+   ],
+   "chapter": "2",
+   "weakness": {
+    "fire": 1,
+    "water": 1,
+    "thunder": 0,
+    "ice": 1,
+    "dragon": 1
+   }
+  },
+  {
+   "name": "Nerscylla",
+   "type": "Temnoceran",
+   "habitat": [
+    "Iceshard Cliffs"
+   ],
+   "chapter": "2",
+   "weakness": {
+    "fire": 2,
+    "water": 0,
+    "thunder": 0,
+    "ice": 1,
+    "dragon": 0
+   }
+  },
+  {
+   "name": "Hirabami",
+   "type": "Leviathan",
+   "habitat": [
+    "Iceshard Cliffs"
+   ],
+   "chapter": "2",
+   "weakness": {
+    "fire": 2,
+    "water": 1,
+    "thunder": 1,
+    "ice": 0,
+    "dragon": 1
+   }
+  },
+  {
+   "name": "Ajarakan",
+   "type": "Fanged Beast",
+   "habitat": [
+    "Oilwell Basin",
+    "Ruins of Wyveria"
+   ],
+   "chapter": "2",
+   "weakness": {
+    "fire": 0,
+    "water": 2,
+    "thunder": 1,
+    "ice": 1,
+    "dragon": 1
+   }
+  },
+  {
+   "name": "Nu Udra",
+   "type": "Cephalopod",
+   "habitat": [
+    "Oilwell Basin"
+   ],
+   "chapter": "2",
+   "weakness": {
+    "fire": 0,
+    "water": 1,
+    "thunder": 1,
+    "ice": 1,
+    "dragon": 1
+   }
+  },
+  {
+   "name": "Guardian Doshaguma",
+   "type": "Construct",
+   "habitat": [
+    "Ruins of Wyveria"
+   ],
+   "chapter": "3",
+   "weakness": {
+    "fire": 2,
+    "water": 1,
+    "thunder": 1,
+    "ice": 2,
+    "dragon": 1
+   }
+  },
+  {
+   "name": "Guardian Rathalos",
+   "type": "Construct",
+   "habitat": [
+    "Ruins of Wyveria"
+   ],
+   "chapter": "3",
+   "weakness": {
+    "fire": 0,
+    "water": 1,
+    "thunder": 1,
+    "ice": 1,
+    "dragon": 2
+   }
+  },
+  {
+   "name": "Guardian Ebony Odogaron",
+   "type": "Construct",
+   "habitat": [
+    "Ruins of Wyveria"
+   ],
+   "chapter": "3",
+   "weakness": {
+    "fire": 2,
+    "water": 2,
+    "thunder": 2,
+    "ice": 2,
+    "dragon": 1
+   }
+  },
+  {
+   "name": "Xu Wu",
+   "type": "Cephalopod",
+   "habitat": [
+    "Ruins of Wyveria"
+   ],
+   "chapter": "3",
+   "weakness": {
+    "fire": 1,
+    "water": 1,
+    "thunder": 1,
+    "ice": 2,
+    "dragon": 0
+   }
+  },
+  {
+   "name": "Guardian Arkveld",
+   "type": "Construct",
+   "habitat": [
+    "Ruins of Wyveria"
+   ],
+   "chapter": "3",
+   "weakness": {
+    "fire": 1,
+    "water": 1,
+    "thunder": 1,
+    "ice": 1,
+    "dragon": 1
+   }
+  },
+  {
+   "name": "Zoh Shia",
+   "type": "Construct",
+   "habitat": [
+    "Ruins of Wyveria"
+   ],
+   "chapter": "3",
+   "weakness": {
+    "fire": 1,
+    "water": 1,
+    "thunder": 1,
+    "ice": 1,
+    "dragon": 2
+   }
+  },
+  {
+   "name": "Guardian Fulgur Anjanath",
+   "type": "Construct",
+   "habitat": [
+    "Ruins of Wyveria"
+   ],
+   "chapter": "3",
+   "weakness": {
+    "fire": 1,
+    "water": 2,
+    "thunder": 0,
+    "ice": 2,
+    "dragon": 1
+   }
+  },
+  {
+   "name": "Yian Kut-Ku",
+   "type": "Bird Wyvern",
+   "habitat": [
+    "Scarlet Forest"
+   ],
+   "chapter": "4",
+   "weakness": {
+    "fire": 1,
+    "water": 1,
+    "thunder": 2,
+    "ice": 2,
+    "dragon": 0
+   }
+  },
+  {
+   "name": "Gypceros",
+   "type": "Bird Wyvern",
+   "habitat": [
+    "Windward Plains",
+    "Oilwell Basin",
+    "Iceshard Cliffs"
+   ],
+   "chapter": "4",
+   "weakness": {
+    "fire": 2,
+    "water": 1,
+    "thunder": 0,
+    "ice": 1,
+    "dragon": 1
+   }
+  },
+  {
+   "name": "Rathian",
+   "type": "Flying Wyvern",
+   "habitat": [
+    "Windward Plains",
+    "Scarlet Forest",
+    "Oilwell Basin"
+   ],
+   "chapter": "4",
+   "weakness": {
+    "fire": 0,
+    "water": 1,
+    "thunder": 1,
+    "ice": 1,
+    "dragon": 2
+   }
+  },
+  {
+   "name": "Rathalos",
+   "type": "Flying Wyvern",
+   "habitat": [
+    "Scarlet Forest"
+   ],
+   "chapter": "4",
+   "weakness": {
+    "fire": 0,
+    "water": 1,
+    "thunder": 1,
+    "ice": 1,
+    "dragon": 2
+   }
+  },
+  {
+   "name": "Gravios",
+   "type": "Flying Wyvern",
+   "habitat": [
+    "Oilwell Basin"
+   ],
+   "chapter": "4",
+   "weakness": {
+    "fire": 0,
+    "water": 2,
+    "thunder": 1,
+    "ice": 1,
+    "dragon": 1
+   }
+  },
+  {
+   "name": "Blangonga",
+   "type": "Fanged Beast",
+   "habitat": [
+    "Iceshard Cliffs"
+   ],
+   "chapter": "4",
+   "weakness": {
+    "fire": 2,
+    "water": 1,
+    "thunder": 1,
+    "ice": 0,
+    "dragon": 0
+   }
+  },
+  {
+   "name": "Jin Dahaad",
+   "type": "Leviathan",
+   "habitat": [
+    "Iceshard Cliffs"
+   ],
+   "chapter": "5",
+   "weakness": {
+    "fire": 1,
+    "water": 1,
+    "thunder": 1,
+    "ice": 0,
+    "dragon": 1
+   }
+  },
+  {
+   "name": "Gore Magala",
+   "type": "Demi-Elder",
+   "habitat": [
+    "Iceshard Cliffs"
+   ],
+   "chapter": "5",
+   "weakness": {
+    "fire": 1,
+    "water": 0,
+    "thunder": 1,
+    "ice": 1,
+    "dragon": 1
+   }
+  },
+  {
+   "name": "Arkveld",
+   "type": "Flying Wyvern",
+   "habitat": [
+    "Windward Plains"
+   ],
+   "chapter": "6",
+   "weakness": {
+    "fire": 1,
+    "water": 1,
+    "thunder": 1,
+    "ice": 1,
+    "dragon": 1
+   }
+  },
+  {
+   "name": "Mizutsune",
+   "type": "Leviathan",
+   "habitat": [
+    "Scarlet Forest"
+   ],
+   "chapter": "6",
+   "weakness": {
+    "fire": 1,
+    "water": 0,
+    "thunder": 2,
+    "ice": 1,
+    "dragon": 2
+   }
+  },
+  {
+   "name": "Lagiacrus",
+   "type": "Leviathan",
+   "habitat": [
+    "Scarlet Forest"
+   ],
+   "chapter": "6",
+   "weakness": {
+    "fire": 2,
+    "water": 0,
+    "thunder": 0,
+    "ice": 1,
+    "dragon": 1
+   }
+  },
+  {
+   "name": "Omega Planetes",
+   "type": "Unknown",
+   "habitat": [
+    "Iceshard Cliffs"
+   ],
+   "chapter": "6",
+   "weakness": {
+    "fire": 0,
+    "water": 1,
+    "thunder": 2,
+    "ice": 1,
+    "dragon": 2
+   }
+  }
+ ]
+}

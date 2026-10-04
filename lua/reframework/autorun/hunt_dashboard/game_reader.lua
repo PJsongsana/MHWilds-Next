@@ -65,34 +65,57 @@ local function hunterName(hunter)
     return ext:get_field("_ContextHolder"):get_Pl():get_PlayerName()
 end
 
+-- Palico name: our own → network manager's palico name; others → "<owner> (Palico)" (Overlay data.lua GetOtomoName)
+local function palicoInfo(otomo)
+    local owner = otomo:get_OwnerHunterCharacter()
+    local ownerName = safe(hunterName, owner) or "Hunter"
+    if owner:get_IsMaster() then
+        return safe(function() return Core.GetNetworkManager():SelfOtomoName() end) or (ownerName .. " (Palico)"), ownerName
+    end
+    return ownerName .. " (Palico)", ownerName
+end
+
+-- One hit on a large monster by a hunter or a palico. Read-only: only looks at the HitInfo.
 local EnemyType = Core.Typeof("app.EnemyCharacter")
+local function recordHit(attacker, hit, newRecord)
+    if not attacker or not hit then return end
+    local dmg = hit:get_DamageData()
+    if not dmg or dmg:get_type_definition():get_name() ~= "cDamageParamEm" then return end
+    local final = dmg:get_field("FinalDamage")
+    if not final or final <= 0 then return end
+    local enemy = hit:get_DamageOwner():getComponent(EnemyType)
+    if not enemy then return end
+    local ctx = enemy._Context._Em
+    if not ctx:get_IsBoss() then return end
+
+    local key = addr(attacker)
+    local rec = damage[key]
+    if not rec then
+        rec = newRecord(attacker)
+        rec.damage, rec.hits, rec.crits, rec.weakHits = 0, 0, 0, 0
+        damage[key] = rec
+    end
+    rec.damage = rec.damage + final
+    rec.hits = rec.hits + 1
+    -- crit / weak-spot flags: same fields Overlay data.lua HandleHitData reads (CriticalType: 1 = Critical)
+    if try("crit", function() return hit:get_AttackData()._CriticaType end) == 1 then rec.crits = rec.crits + 1 end
+    if try("weakHit", function() return dmg.IsHitWeakPoint_Parts or dmg.IsHitWeakPoint_Scar end) then rec.weakHits = rec.weakHits + 1 end
+    if rec.self then selfTarget = addr(ctx) end
+end
+
 sdk.hook(sdk.find_type_definition("app.HunterCharacter"):get_method("evHit_AttackPostProcess(app.HitInfo)"),
 function(args)
-    pcall(function()
-        local hunter = sdk.to_managed_object(args[2])
-        local hit = sdk.to_managed_object(args[3])
-        if not hunter or not hit then return end
-        local dmg = hit:get_DamageData()
-        if not dmg or dmg:get_type_definition():get_name() ~= "cDamageParamEm" then return end
-        local final = dmg:get_field("FinalDamage")
-        if not final or final <= 0 then return end
-        local enemy = hit:get_DamageOwner():getComponent(EnemyType)
-        if not enemy then return end
-        local ctx = enemy._Context._Em
-        if not ctx:get_IsBoss() then return end
+    pcall(recordHit, sdk.to_managed_object(args[2]), sdk.to_managed_object(args[3]), function(hunter)
+        return { name = safe(hunterName, hunter) or "Hunter", self = hunter:get_IsMaster() }
+    end)
+end)
 
-        local key = addr(hunter)
-        local rec = damage[key]
-        if not rec then
-            rec = { name = safe(hunterName, hunter) or "Hunter", self = hunter:get_IsMaster(), damage = 0, hits = 0, crits = 0, weakHits = 0 }
-            damage[key] = rec
-        end
-        rec.damage = rec.damage + final
-        rec.hits = rec.hits + 1
-        -- crit / weak-spot flags: same fields Overlay data.lua HandleHitData reads (CriticalType: 1 = Critical)
-        if try("crit", function() return hit:get_AttackData()._CriticaType end) == 1 then rec.crits = rec.crits + 1 end
-        if try("weakHit", function() return dmg.IsHitWeakPoint_Parts or dmg.IsHitWeakPoint_Scar end) then rec.weakHits = rec.weakHits + 1 end
-        if rec.self then selfTarget = addr(ctx) end
+-- Palico hits (Overlay collector_damage.lua hooks the same method on app.OtomoCharacter)
+sdk.hook(sdk.find_type_definition("app.OtomoCharacter"):get_method("evHit_AttackPostProcess(app.HitInfo)"),
+function(args)
+    pcall(recordHit, sdk.to_managed_object(args[2]), sdk.to_managed_object(args[3]), function(otomo)
+        local name, owner = palicoInfo(otomo)
+        return { name = name, palico = true, owner = owner, self = false }
     end)
 end)
 
@@ -249,16 +272,6 @@ local function sizePct(ctx)
 end
 
 
--- English name whatever the game language is — the UI matches it against src/data/monsters.json.
--- Same call _CatLib/game/text.lua GetEnemyName makes, with an explicit language (1 = English, _CatLib.const LanguageType).
-local EnemyNameGuid = sdk.find_type_definition("app.EnemyDef"):get_method("EnemyName(app.EnemyDef.ID)")
-local nameEnCache = {}
-local function nameEn(emID)
-    if nameEnCache[emID] == nil then
-        nameEnCache[emID] = try("nameEn", function() return Core.GetLocalizedText(EnemyNameGuid:call(nil, emID), 1) end) or false
-    end
-    return nameEnCache[emID] or nil
-end
 
 local function readMonster(enemy)
     local ctx = enemy._Context._Em
@@ -266,7 +279,6 @@ local function readMonster(enemy)
     local hpMgr = enemy:get_HealthMgr()
     local m = {
         id = addr(ctx),
-        nameEn = nameEn(emID),
         name = Core.GetEnemyName(emID) or ("EM " .. emID),
         hp = hpMgr:get_Health(),
         hpMax = hpMgr:get_MaxHealth(),
@@ -311,11 +323,14 @@ local function readBuffs()
     -- mantles / active skills and hunting-horn songs; each source isolated so one failing keeps the rest
     try("mantle", function()
         -- app.mcActiveSkillController._ActiveSkills: get_IsUse / get_Timer (Overlay status/data.lua UpdateASkill)
+        -- in use → effect time left; not usable yet → cooldown left (get_IsCanUseTrigger false, Overlay UpdateASkill)
         Core.ForEach(hunter:get_ASkillController()._ActiveSkills, function(askill, i)
-            if askill:get_IsUse() then
+            local using, cooling = askill:get_IsUse(), not askill:get_IsCanUseTrigger()
+            if using or cooling then
                 local t = askill:get_Timer()
                 if type(t) == "number" and t > 0 then
-                    table.insert(out, { id = "askill_" .. i, kind = "mantle", name = Core.GetASkillName(i) or ("Mantle " .. i), remainSec = t })
+                    table.insert(out, { id = "askill_" .. i, kind = "mantle", name = Core.GetASkillName(i) or ("Mantle " .. i),
+                        remainSec = t, cooldown = (not using) or nil })
                 end
             end
         end)
@@ -396,7 +411,8 @@ function M.snapshot()
         vitals = readVitals(),
     }
     for _, rec in pairs(damage) do
-        table.insert(snap.party, { name = rec.name, self = rec.self, damage = math.floor(rec.damage), hits = rec.hits, crits = rec.crits, weakHits = rec.weakHits })
+        table.insert(snap.party, { name = rec.name, self = rec.self, palico = rec.palico, owner = rec.owner,
+            damage = math.floor(rec.damage), hits = rec.hits, crits = rec.crits, weakHits = rec.weakHits })
     end
     if next(errors) then snap.errors = errors end
     return snap

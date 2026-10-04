@@ -1,5 +1,3 @@
-import monsterData from './data/monsters.json';
-
 // Data contract (HANDOFF §3) + every value the UI derives itself (§3 last line, §7). Pure, tested in logic.test.ts.
 
 export type Crown = 'gold' | 'silver' | 'mini' | null;
@@ -15,13 +13,12 @@ export type Hitzone = { id: string; name: string; kind: string } & Record<PhysTy
 export interface Scar { part?: string | null; partId?: string; state: 'tear' | 'raw'; legendary?: boolean; ride?: boolean }
 export interface Monster {
   id: string; name: string; hp: number; hpMax: number;
-  nameEn?: string | null; // English name (any game language) — key into data/monsters.json
   captureThreshold?: number | null; sizePct?: number | null; crown?: Crown;
   enraged?: boolean; enrageRemainSec?: number | null; wounds?: number | null;
   parts: Part[]; ailments: Ailment[]; hitzones: Hitzone[]; scars: Scar[];
 }
-export interface Buff { id: string; name: string; remainSec: number | null; kind?: 'mantle' | 'song' }
-export interface Member { name: string; self?: boolean; damage: number; hits?: number; crits?: number; weakHits?: number }
+export interface Buff { id: string; name: string; remainSec: number | null; kind?: 'mantle' | 'song'; cooldown?: boolean }
+export interface Member { name: string; self?: boolean; palico?: boolean; owner?: string; damage: number; hits?: number; crits?: number; weakHits?: number }
 export interface Vitals { hp?: number; hpMax?: number; hpRed?: number; stamina?: number; staminaMax?: number }
 export interface Snapshot {
   v: number; ts: number; connected: boolean; error?: string;
@@ -80,19 +77,23 @@ export function partViews(parts: Part[]): PartView[] {
     .sort((a, b) => Number(a.broken) - Number(b.broken) || (a.broken ? 0 : a.remain - b.remain));
 }
 
-export type BuffVariant = 'normal' | 'warn' | 'infinite';
+export type BuffVariant = 'normal' | 'warn' | 'infinite' | 'cooldown';
 /** Expired buffs disappear; null remainSec = no expiry. */
 export function buffViews(buffs: Buff[]): (Buff & { variant: BuffVariant })[] {
   return buffs
     .filter((b) => b.remainSec == null || b.remainSec > 0)
-    .map((b) => ({ ...b, variant: b.remainSec == null ? 'infinite' : b.remainSec <= BUFF_WARN_SEC ? 'warn' : 'normal' }));
+    .map((b) => ({ ...b, variant: b.cooldown ? 'cooldown' : b.remainSec == null ? 'infinite' : b.remainSec <= BUFF_WARN_SEC ? 'warn' : 'normal' }));
 }
 
 export function partyViews(party: Member[], elapsedSec: number) {
   const total = party.reduce((s, m) => s + Math.max(0, m.damage), 0);
-  const members = [...party]
-    .sort((a, b) => Number(!!b.self) - Number(!!a.self) || b.damage - a.damage)
-    .slice(0, 5) // 4 hunters + an NPC support hunter (a recording showed 5)
+  // hunters: us first, then by damage; each palico right after its owner. Palico damage counts toward the team.
+  const hunters = party.filter((m) => !m.palico).sort((a, b) => Number(!!b.self) - Number(!!a.self) || b.damage - a.damage);
+  const palicos = party.filter((m) => m.palico);
+  const ordered = hunters.flatMap((h) => [h, ...palicos.filter((p) => p.owner === h.name)]);
+  ordered.push(...palicos.filter((p) => !ordered.includes(p)));
+  const members = ordered
+    .slice(0, 10)
     .map((m) => ({
       ...m,
       pct: party.length === 1 ? 100 : pct(m.damage, total),
@@ -172,22 +173,6 @@ export function elementRank(hitzones: Hitzone[]) {
     .sort((a, b) => b.value - a.value);
 }
 
-/* ------------------------------ static monster info (mh-wilds.kerlos.in.th) ------------------------------ */
-
-export interface MonsterInfo { name: string; type: string | null; habitat: string[]; chapter: string | null; weakness: Record<Element, number> }
-
-const key = (s?: string | null) => (s ?? '').trim().toLowerCase();
-const INFO = new Map((monsterData.monsters as MonsterInfo[]).map((m) => [key(m.name), m]));
-
-/** Site data for this monster, matched by English name first (game may run in Thai), then display name. */
-export function monsterInfo(m: Pick<Monster, 'name' | 'nameEn'>, table = INFO): MonsterInfo | null {
-  return table.get(key(m.nameEn)) ?? table.get(key(m.name)) ?? null;
-}
-
-/** Element stars 0–3 from the site, best first — used when live hitzones aren't available. */
-export const elementStars = (info: MonsterInfo | null) =>
-  info ? ELEMENTS.map((el) => ({ el, stars: info.weakness[el] ?? 0 })).filter((e) => e.stars > 0).sort((a, b) => b.stars - a.stars) : [];
-
 /* ------------------------------ "do this now" callouts ------------------------------ */
 
 /** `who` = name of a monster other than the one on the big card (multi-monster hunts). */
@@ -247,4 +232,48 @@ export function linkState(s: Snapshot | null, wsOpen: boolean, now: number): Lin
   if (!wsOpen || !s) return 'connecting';
   if (!s.connected) return 'offline';
   return now - s.ts > STALE_MS ? 'stale' : 'live';
+}
+
+/* ------------------------------ buff uptime + hunt history ------------------------------ */
+
+/** Add `dt` seconds to every buff that is running (not recharging) in this snapshot. */
+export function addUptime(acc: Record<string, { name: string; sec: number }>, buffs: Buff[], dt: number) {
+  for (const b of buffs) {
+    if (b.cooldown || (b.remainSec != null && b.remainSec <= 0)) continue;
+    const e = (acc[b.id] ??= { name: b.name, sec: 0 });
+    e.sec += dt;
+  }
+  return acc;
+}
+
+/** Uptime % per buff over the quest, highest first. */
+export const uptimeViews = (acc: Record<string, { name: string; sec: number }>, elapsedSec: number) =>
+  Object.entries(acc).map(([id, e]) => ({ id, name: e.name, pct: pct(e.sec, elapsedSec) })).sort((a, b) => b.pct - a.pct);
+
+export interface HuntRecord {
+  id: string;
+  endedAt: number;
+  snap: Snapshot; // trimmed to what the summary screen needs
+  samples: DamageSample[];
+  uptime: Record<string, { name: string; sec: number }>;
+}
+
+/** Shrink a finished quest for storage: drop hitzones/scars, keep ≤300 chart points. */
+export function compactRecord(snap: Snapshot, samples: DamageSample[], uptime: HuntRecord['uptime'], endedAt: number): HuntRecord {
+  const step = Math.max(1, Math.ceil(samples.length / 300));
+  return {
+    id: String(endedAt),
+    endedAt,
+    snap: {
+      ...snap,
+      monsters: snap.monsters.map((m) => ({
+        ...m, hitzones: [], scars: [],
+        parts: m.parts.map((p) => ({ ...p })),
+        ailments: m.ailments.map((a) => ({ id: a.id, buildup: 0, procs: a.procs })),
+      })),
+      player: { buffs: [] },
+    },
+    samples: samples.filter((_, i) => i % step === 0 || i === samples.length - 1),
+    uptime,
+  };
 }

@@ -5,7 +5,7 @@ const hz = (id: string, name: string, kind: string, slash: number, blow: number,
   ({ id, name, kind, slash, blow, shot, fire: 10, water: 15, thunder: 0, ice: 20, dragon: 5, ...el });
 
 const reyDau: Monster = {
-  id: 'm1', name: 'เรย์ ดาว', nameEn: 'Rey Dau', hp: 9800, hpMax: 24000, captureThreshold: 0.2,
+  id: 'm1', name: 'เรย์ ดาว', hp: 9800, hpMax: 24000, captureThreshold: 0.2,
   sizePct: 112, crown: 'gold', enraged: false, enrageRemainSec: null, wounds: 3,
   parts: [
     { id: 'head', name: 'หัว', kind: 'head', hp: 120, hpMax: 1000, broken: false },
@@ -49,11 +49,13 @@ const base: Snapshot = {
       { id: 'might_seed', name: 'Might Seed', remainSec: 12 },
       { id: 'askill_3', kind: 'mantle', name: 'Rocksteady Mantle', remainSec: 108 },
       { id: 'song_2', kind: 'song', name: 'Attack Up (S)', remainSec: 64 },
+      { id: 'askill_5', kind: 'mantle', name: 'Evasion Mantle', remainSec: 42, cooldown: true },
       { id: 'hot_drink', name: 'Hot Drink', remainSec: 390 },
     ],
   },
   party: [
     { name: 'คุณ', self: true, damage: 9820, hits: 212, crits: 71, weakHits: 140 },
+    { name: 'Aibou', palico: true, owner: 'คุณ', damage: 1150, hits: 60, crits: 3, weakHits: 20 },
     { name: 'Player 2', damage: 6240, hits: 180, crits: 40, weakHits: 90 },
     { name: 'Player 3', damage: 4800, hits: 150, crits: 22, weakHits: 60 },
     { name: 'Player 4', damage: 3100, hits: 90, crits: 9, weakHits: 30 },
@@ -76,21 +78,21 @@ export const mocks: Record<string, Snapshot> = {
   multi: {
     ...base,
     targetId: 'm2',
-    monsters: [{ ...reyDau, hp: 4320 }, { ...reyDau, id: 'm2', name: 'Rathalos', nameEn: 'Rathalos', hp: 21000, hpMax: 26000, enraged: true, enrageRemainSec: 35, crown: null, sizePct: null, wounds: 0, parts: [], ailments: [], scars: [] }],
+    monsters: [{ ...reyDau, hp: 4320 }, { ...reyDau, id: 'm2', name: 'Rathalos', hp: 21000, hpMax: 26000, enraged: true, enrageRemainSec: 35, crown: null, sizePct: null, wounds: 0, parts: [], ailments: [], scars: [] }],
   },
   oneDown: {
     ...base,
     monsters: [
       { ...reyDau, hp: 0, enraged: false },
-      { ...reyDau, id: 'm2', name: 'Rathalos', nameEn: 'Rathalos', hp: 15000, hpMax: 26000, enraged: true, enrageRemainSec: 22 },
-      { ...reyDau, id: 'm3', name: 'Uth Duna', nameEn: 'Uth Duna', hp: 20000, hpMax: 30000, crown: null, parts: [], scars: [], wounds: 0 },
+      { ...reyDau, id: 'm2', name: 'Rathalos', hp: 15000, hpMax: 26000, enraged: true, enrageRemainSec: 22 },
+      { ...reyDau, id: 'm3', name: 'Uth Duna', hp: 20000, hpMax: 30000, crown: null, parts: [], scars: [], wounds: 0 },
     ],
     targetId: 'm2',
   },
   lastAlive: {
     ...base,
     monsters: [
-      { ...reyDau, id: 'm2', name: 'Rathalos', nameEn: 'Rathalos', hp: 0, hpMax: 26000 },
+      { ...reyDau, id: 'm2', name: 'Rathalos', hp: 0, hpMax: 26000 },
       { ...reyDau, hp: 4320 },
     ],
     targetId: 'm2', // last hit the dead one → big card still follows the live one

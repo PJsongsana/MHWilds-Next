@@ -25,7 +25,9 @@ npm run dist      # package it: release/HuntDashboard-<version>-portable.exe (si
 ```
 
 The app window remembers its position, never takes focus from the game, F11 = fullscreen, Alt+F4 closes, drag it by the header.
-Press **S** (or the gear button) for settings: bridge port, size, alert sounds, which panels to show. After a quest ends the dashboard shows a hunt summary (time, damage, DPS chart, crit and weak-spot rates) until the next quest starts. After editing Lua in game: REFramework menu → ScriptRunner → Reset scripts.
+Press **S** (or the gear button) for settings: bridge port, size, alert sounds, which panels to show. After a quest ends the dashboard shows a hunt summary (time, damage, DPS chart, crit and weak-spot rates, buff uptime); the last 50 hunts are kept and can be flipped through with the strip below it or ←/→. Damage includes palicos (own row under their hunter); mantles show their cooldown.
+
+**Discord Rich Presence** (desktop app): create an application at discord.com/developers, then put its Application ID in settings (S) → Discord. Shows "Hunting <monster> · HP %" with the quest timer. After editing Lua in game: REFramework menu → ScriptRunner → Reset scripts.
 
 Game folder is found from Steam's `libraryfolders.vdf`; override with `MHW_GAME_DIR`.
 
@@ -42,6 +44,3 @@ Game folder is found from Steam's `libraryfolders.vdf`; override with `MHW_GAME_
 - `src/logic.ts` — data contract + all derived values (`npm test`)
 - `src/App.tsx` — UI · `src/strings.ts` — text · `src/icons.tsx` — icons · `src/mocks.ts` — mock states
 
-## Credits
-
-Monster type / habitat / element weakness stars (`src/data/monsters.json`, `npm run fetch-monster-data`) come from [mh-wilds.kerlos.in.th](https://mh-wilds.kerlos.in.th/monster) by keRLos. Live hitzones are read from the game.

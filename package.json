@@ -16,8 +16,7 @@
     "install-lua": "node scripts/install-lua.js",
     "app": "vite build && node scripts/electron.js",
     "app:dev": "node scripts/electron.js --dev",
-    "dist": "tsc && vite build && node scripts/dist.js",
-    "fetch-monster-data": "node scripts/fetch-monster-data.js"
+    "dist": "tsc && vite build && node scripts/dist.js"
   },
   "build": {
     "appId": "th.mhwilds.huntdashboard",
@@ -41,6 +40,7 @@
     "compression": "maximum"
   },
   "dependencies": {
+    "@xhayper/discord-rpc": "^1.5.1",
     "ws": "^8.18.0"
   },
   "devDependencies": {

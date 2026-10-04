@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import {
   buffViews, callouts, elementRank, hpState, linkState, mmss, normalize, partViews, partyViews, pct, physTypeFor, pickMonster,
-  weakSpots, monsterInfo, elementStars, dpsSeries, questSummary, type Hitzone, type Monster,
+  weakSpots, dpsSeries, questSummary, addUptime, uptimeViews, compactRecord, type Hitzone, type Monster,
 } from './logic';
 
 const hz = (name: string, slash: number, blow: number, shot: number, fire = 0, ice = 0): Hitzone =>
@@ -104,14 +104,6 @@ test('link state + time format', () => {
   expect(mmss(754)).toBe('12:34');
 });
 
-test('monster info: English name first, then display name, else null', () => {
-  const table = new Map([['rey dau', { name: 'Rey Dau', type: 'Flying Wyvern', habitat: [], chapter: '2', weakness: { fire: 1, water: 1, thunder: 0, ice: 3, dragon: 2 } }]]);
-  expect(monsterInfo({ name: 'เรย์ดาว', nameEn: 'Rey Dau ' }, table)?.type).toBe('Flying Wyvern');
-  expect(monsterInfo({ name: 'REY DAU' }, table)?.name).toBe('Rey Dau');
-  expect(monsterInfo({ name: 'เรย์ดาว' }, table)).toBe(null);
-  expect(elementStars(table.get('rey dau')!).map((e) => e.el)).toEqual(['ice', 'dragon', 'fire', 'water']);
-  expect(monsterInfo({ name: 'x', nameEn: 'Chatacabra' })?.type).toBeTruthy(); // real scraped table
-});
 
 test('callouts cover other monsters: their capture/enrage show with a name, after the big-card one', () => {
   const mk = (id: string, name: string, hp: number, enraged = false): Monster =>
@@ -145,4 +137,22 @@ test('quest summary: monsters, summed ailment procs, party', () => {
   expect(q.monsters.map((x) => [x.name, x.done, x.broken, x.parts])).toEqual([['a', true, 1, 2], ['b', false, 1, 2]]);
   expect(q.procs).toEqual([{ id: 'paralysis', n: 4 }]);
   expect(q.party.dps).toBe(10);
+});
+
+test('buff uptime: running buffs only, % of quest time', () => {
+  const acc = {};
+  addUptime(acc, [{ id: 'a', name: 'A', remainSec: 30 }, { id: 'm', name: 'M', remainSec: 40, cooldown: true }], 60);
+  addUptime(acc, [{ id: 'a', name: 'A', remainSec: null }], 30);
+  expect(uptimeViews(acc, 120)).toEqual([{ id: 'a', name: 'A', pct: 75 }]);
+});
+
+test('compact record keeps the summary data and ≤300 chart points', () => {
+  const s = normalize({ v: 1, ts: 0, connected: true, quest: { active: true, elapsedSec: 900, limitSec: 3000 },
+    monsters: [{ id: 'm', name: 'x', hp: 0, hpMax: 1, hitzones: [{}], scars: [{}], parts: [], ailments: [{ id: 'sleep', buildup: 0.4, procs: 2 }] }] });
+  const samples = Array.from({ length: 901 }, (_, t) => ({ t, team: t * 10, self: t * 3 }));
+  const r = compactRecord(s, samples, {}, 1000);
+  expect(r.samples.length).toBeLessThanOrEqual(301);
+  expect(r.samples.at(-1)).toEqual(samples.at(-1));
+  expect(r.snap.monsters[0].hitzones).toEqual([]);
+  expect(questSummary(r.snap).procs).toEqual([{ id: 'sleep', n: 2 }]);
 });

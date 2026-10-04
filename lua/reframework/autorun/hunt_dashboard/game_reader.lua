@@ -364,10 +364,47 @@ local function readVitals()
 end
 
 ---------------------------------------------------------------------------
+-- Hunter profile (the "นักล่า" tab): HR, weapon, active skills. Changes rarely → read every 2s.
+-- getHunterRank() = Overlay data.lua GetMasterPlayerHR; getSkillLevel = Overlay status/data.lua
+---------------------------------------------------------------------------
+local WeaponNames = Core.GetEnumMap("app.WeaponDef.TYPE")
+local GetHR = sdk.find_type_definition("app.BasicParamUtil"):get_method("getHunterRank()")
+local GetSkillLevel = sdk.find_type_definition("app.cHunterSkill"):get_method("getSkillLevel(app.HunterDef.Skill, System.Boolean, System.Boolean)")
+local SkillIds = Core.GetEnumMap("app.HunterDef.Skill")
+local PROFILE_EVERY = 2
+local profile, profileAt = nil, -100
+
+local function readSkills(hunter)
+    local out = {}
+    local skill = hunter:get_HunterStatus()._Skill
+    for id, enumName in pairs(SkillIds) do
+        -- the enum also has NONE/MAX values: guard each call so one bad id never drops the list
+        local lv = type(id) == "number" and id > 0 and enumName ~= "MAX" and safe(GetSkillLevel.call, GetSkillLevel, skill, id, false, false)
+        if type(lv) == "number" and lv > 0 then
+            table.insert(out, { id = enumName, name = safe(Core.GetSkillName, id) or enumName, lv = lv,
+                max = safe(Core.GetEquipSkillMaxLevel, id) or nil })
+        end
+    end
+    table.sort(out, function(a, b) if a.lv ~= b.lv then return a.lv > b.lv end return a.name < b.name end)
+    return out
+end
+
+local function readProfile()
+    local hunter = Core.GetPlayerCharacter()
+    if not hunter then return nil end
+    local wp = Core.GetPlayerWeaponType()
+    return {
+        name = safe(hunterName, hunter),
+        hr = try("hr", function() return GetHR:call(nil) end),
+        weapon = wp and { type = WeaponNames[wp], name = safe(Core.GetWeaponTypeName, wp) } or nil,
+        skills = try("skills", readSkills, hunter) or {},
+    }
+end
+
+---------------------------------------------------------------------------
 -- Snapshot (spec §3 data contract)
 ---------------------------------------------------------------------------
 local wasActive = false
-local WeaponNames = Core.GetEnumMap("app.WeaponDef.TYPE")
 
 function M.snapshot()
     local active = Core.IsActiveQuest()
@@ -414,6 +451,11 @@ function M.snapshot()
         table.insert(snap.party, { name = rec.name, self = rec.self, palico = rec.palico, owner = rec.owner,
             damage = math.floor(rec.damage), hits = rec.hits, crits = rec.crits, weakHits = rec.weakHits })
     end
+    local now = Core.GetTime()
+    if now - profileAt >= PROFILE_EVERY then
+        profile, profileAt = try("profile", readProfile), now
+    end
+    snap.profile = profile
     if next(errors) then snap.errors = errors end
     return snap
 end

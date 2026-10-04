@@ -16,7 +16,8 @@
     "install-lua": "node scripts/install-lua.js",
     "app": "vite build && node scripts/electron.js",
     "app:dev": "node scripts/electron.js --dev",
-    "dist": "tsc && vite build && node scripts/dist.js"
+    "dist": "tsc && vite build && node scripts/dist.js",
+    "icon": "node scripts/make-icon.mjs"
   },
   "build": {
     "appId": "th.mhwilds.huntdashboard",
@@ -27,8 +28,12 @@
       "bridge/**",
       "package.json"
     ],
+    "extraResources": [
+      { "from": "lua", "to": "lua" }
+    ],
     "win": {
-      "target": "portable"
+      "target": "portable",
+      "icon": "build/icon.ico"
     },
     "portable": {
       "artifactName": "HuntDashboard-${version}-portable.exe"

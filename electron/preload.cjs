@@ -3,4 +3,5 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('huntApp', {
   setDiscord: (cfg) => ipcRenderer.send('discord:configure', cfg),
+  getSetup: () => ipcRenderer.invoke('setup:get'),
 });

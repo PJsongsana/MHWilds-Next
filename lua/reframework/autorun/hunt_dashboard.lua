@@ -4,6 +4,8 @@ local OUT = "hunt_dashboard.json"
 local INTERVAL = 0.2
 
 local ok, reader = pcall(require, "hunt_dashboard.game_reader")
+local probeOk, probe = pcall(require, "hunt_dashboard.probe")
+local probeMsg
 local last = 0
 -- os.clock() is CPU time (runs faster than wall time on a multi-threaded game)
 local UpTime = sdk.find_type_definition("via.Application"):get_method("get_UpTimeSecond")
@@ -26,6 +28,12 @@ end)
 re.on_draw_ui(function()
     if imgui.tree_node("Hunt Dashboard") then
         imgui.text(ok and ("running -> reframework/data/" .. OUT) or ("error: " .. tostring(reader)))
+        -- phase-2 research for the นักล่า tab: dump field names of hunter status + save data
+        if probeOk and imgui.button("Dump profile fields") then
+            local good, r = pcall(probe.dump)
+            probeMsg = good and ("written -> reframework/data/" .. r) or ("probe error: " .. tostring(r))
+        end
+        if probeMsg then imgui.text(probeMsg) end
         imgui.tree_pop()
     end
 end)

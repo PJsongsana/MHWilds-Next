@@ -60,6 +60,17 @@ const base: Snapshot = {
     { name: 'Player 3', damage: 4800, hits: 150, crits: 22, weakHits: 60 },
     { name: 'Player 4', damage: 3100, hits: 90, crits: 9, weakHits: 30 },
   ],
+  profile: {
+    name: 'คุณ', hr: 87, weapon: { type: 'LONG_SWORD', name: 'ดาบยาว' },
+    skills: [
+      { id: 'WEAKNESS_EXPLOIT', name: 'Weakness Exploit', lv: 5, max: 5 },
+      { id: 'CRITICAL_EYE', name: 'Critical Eye', lv: 5, max: 5 },
+      { id: 'AGITATOR', name: 'Agitator', lv: 4, max: 5 },
+      { id: 'CRITICAL_BOOST', name: 'Critical Boost', lv: 3, max: 5 },
+      { id: 'EVADE_WINDOW', name: 'Evade Window', lv: 2, max: 5 },
+      { id: 'FREE_MEAL', name: 'Free Meal', lv: 1, max: 3 },
+    ],
+  },
 };
 
 const withMonster = (m: Partial<Monster>): Snapshot => ({ ...base, monsters: [{ ...reyDau, ...m }] });

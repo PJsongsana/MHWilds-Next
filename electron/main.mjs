@@ -4,16 +4,19 @@
 // A normal Windows window (resize, maximize, Snap; dark title bar), F11 = fullscreen.
 // Opens on the second monitor the first time, then remembers position / maximized,
 // and never takes focus from the game (shown inactive).
-import { app, BrowserWindow, ipcMain, nativeTheme, screen } from 'electron';
+import { app, BrowserWindow, ipcMain, nativeTheme, screen, shell } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startBridge } from '../bridge/server.js';
+import { ensureSetup } from '../bridge/setup.js';
 import { configureDiscord, shutdownDiscord } from './discord.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dev = process.argv.includes('--dev');
 app.setName('Hunt Dashboard'); // own userData folder (%APPDATA%/Hunt Dashboard) instead of the generic "Electron"
+// our Lua: shipped next to the app (package.json extraResources), or the repo folder when not packaged
+const luaSrc = () => (app.isPackaged ? path.join(process.resourcesPath, 'lua/reframework') : path.join(here, '../lua/reframework'));
 const stateFile = () => path.join(app.getPath('userData'), 'window.json');
 
 // { x, y, width, height, maximized } — null if missing or that monitor is gone
@@ -44,6 +47,8 @@ app.whenReady().then(() => {
     backgroundColor: '#0D0A07',
     title: 'Hunt Dashboard',
     autoHideMenuBar: true,
+    // packaged: Windows takes the .exe icon (electron-builder embeds build/icon.ico); dev: point at it
+    ...(app.isPackaged ? {} : { icon: path.join(here, '../build/icon.ico') }),
     // keep updating while the game has focus; preload exposes window.huntApp (Discord settings)
     webPreferences: { backgroundThrottling: false, preload: path.join(here, 'preload.cjs') },
   });
@@ -67,6 +72,13 @@ app.whenReady().then(() => {
   });
 
   ipcMain.on('discord:configure', (_e, cfg) => configureDiscord(cfg));
+  // install/update our Lua in the game folder and report REFramework/_CatLib (also the page's "check again" button)
+  ipcMain.handle('setup:get', () => ensureSetup(luaSrc()));
+  // links on the page (setup help) open in the browser, never in a new app window; https only
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('https://')) shell.openExternal(url);
+    return { action: 'deny' };
+  });
 
   app.on('window-all-closed', () => {
     shutdownDiscord();

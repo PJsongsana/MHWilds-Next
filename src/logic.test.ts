@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import {
   buffViews, callouts, elementRank, hpState, linkState, mmss, normalize, partViews, partyViews, pct, physTypeFor, pickMonster,
-  weakSpots, dpsSeries, questSummary, addUptime, uptimeViews, compactRecord, type Hitzone, type Monster,
+  weakSpots, dpsSeries, questSummary, addUptime, uptimeViews, compactRecord, historyStats, type Hitzone, type Monster,
 } from './logic';
 
 const hz = (name: string, slash: number, blow: number, shot: number, fire = 0, ice = 0): Hitzone =>
@@ -155,4 +155,21 @@ test('compact record keeps the summary data and ≤300 chart points', () => {
   expect(r.samples.at(-1)).toEqual(samples.at(-1));
   expect(r.snap.monsters[0].hitzones).toEqual([]);
   expect(questSummary(r.snap).procs).toEqual([{ id: 'sleep', n: 2 }]);
+});
+
+test('history stats: totals, best DPS, monsters by count with fastest slay', () => {
+  const rec = (sec: number, self: number, mons: [string, number][]) => compactRecord(normalize({ v: 1, ts: 0, connected: true,
+    quest: { active: true, elapsedSec: sec, limitSec: 3000 }, party: [{ name: 'me', self: true, damage: self }, { name: 'b', damage: 999 }],
+    monsters: mons.map(([name, hp]) => ({ id: name, name, hp, hpMax: 100 })),
+    profile: { hr: 50, skills: [] } }), [], {}, sec);
+  const st = historyStats([rec(600, 6000, [['A', 0]]), rec(300, 6000, [['A', 0], ['B', 10]]), rec(100, 0, [['A', 5]])]);
+  expect(st).toMatchObject({ hunts: 3, totalSec: 1000, selfDamage: 12000, bestDps: 20, avgDps: 12 });
+  expect(st.monsters).toEqual([{ name: 'A', count: 3, slain: 2, bestSec: 300 }, { name: 'B', count: 1, slain: 0, bestSec: null }]);
+  expect(rec(1, 0, []).snap.profile).toBeNull(); // the stored hunt doesn't carry the profile
+  expect(historyStats([])).toMatchObject({ hunts: 0, avgDps: 0, monsters: [] });
+});
+
+test('profile: missing → null, skills always an array', () => {
+  expect(normalize({}).profile).toBeNull();
+  expect(normalize({ profile: { hr: 7, skills: {} } }).profile).toEqual({ hr: 7, skills: [] });
 });

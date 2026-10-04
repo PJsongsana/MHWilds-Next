@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Discord small image: monster under an ailment (paralysis, sleep, …). Rendered by `npm run icon`. -->
+  <circle cx="128" cy="128" r="124" fill="#B08F12"/>
+  <path transform="translate(32 32) scale(8)" d="M13 2L4 14h7l-1 8l9-12h-7l1-8Z" fill="#FFF8E0"/>
+</svg>

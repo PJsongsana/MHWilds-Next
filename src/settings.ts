@@ -2,7 +2,9 @@
 import { useSyncExternalStore } from 'react';
 
 export type PanelKey = 'now' | 'parts' | 'ailments' | 'buffs' | 'damage';
+export type Tab = 'hunt' | 'hunter';
 export interface Settings {
+  tab: Tab; // การล่า / นักล่า
   port: number;
   scale: number; // multiplies the auto-fit zoom
   sound: boolean;
@@ -11,6 +13,7 @@ export interface Settings {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
+  tab: 'hunt',
   port: 8787,
   scale: 1,
   sound: false, // browsers only allow audio after a click, so it's opt-in from the settings screen

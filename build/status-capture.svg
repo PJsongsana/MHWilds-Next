@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- Discord small image: monster can be captured. Rendered by `npm run icon`. -->
+  <circle cx="128" cy="128" r="124" fill="#2F8F5B"/>
+  <path transform="translate(32 36) scale(8)" d="M5 12l5 5l9-10" fill="none" stroke="#EFFFF5" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

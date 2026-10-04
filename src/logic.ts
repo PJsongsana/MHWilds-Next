@@ -20,6 +20,9 @@ export interface Monster {
 export interface Buff { id: string; name: string; remainSec: number | null; kind?: 'mantle' | 'song'; cooldown?: boolean }
 export interface Member { name: string; self?: boolean; palico?: boolean; owner?: string; damage: number; hits?: number; crits?: number; weakHits?: number }
 export interface Vitals { hp?: number; hpMax?: number; hpRed?: number; stamina?: number; staminaMax?: number }
+/** The นักล่า tab: read by the Lua every ~2s. Gear/stats/save fields come later (phase 2, after the probe). */
+export interface Skill { id: string; name: string; lv: number; max?: number | null }
+export interface Profile { name?: string | null; hr?: number | null; weapon?: { type?: string | null; name?: string | null } | null; skills: Skill[] }
 export interface Snapshot {
   v: number; ts: number; connected: boolean; error?: string;
   quest?: { name?: string | null; elapsedSec: number; limitSec: number; remainSec?: number | null; active: boolean };
@@ -28,6 +31,7 @@ export interface Snapshot {
   monsters: Monster[];
   player: { buffs: Buff[]; weapon?: string | null; vitals?: Vitals | null };
   party: Member[];
+  profile?: Profile | null;
 }
 
 // Lua's json encodes an empty table as {} (or drops it) — make every list a real array.
@@ -41,6 +45,7 @@ export function normalize(raw: any): Snapshot {
     })),
     player: { buffs: arr(raw?.player?.buffs), weapon: raw?.player?.weapon ?? null, vitals: raw?.player?.vitals ?? null },
     party: arr(raw?.party),
+    profile: raw?.profile ? { ...raw.profile, skills: arr(raw.profile.skills) } : null,
   };
 }
 
@@ -272,8 +277,44 @@ export function compactRecord(snap: Snapshot, samples: DamageSample[], uptime: H
         ailments: m.ailments.map((a) => ({ id: a.id, buildup: 0, procs: a.procs })),
       })),
       player: { buffs: [] },
+      profile: null,
     },
     samples: samples.filter((_, i) => i % step === 0 || i === samples.length - 1),
     uptime,
+  };
+}
+
+/* ------------------------------ account stats (from our own hunt history) ------------------------------ */
+
+export interface HistoryStats {
+  hunts: number; totalSec: number; selfDamage: number;
+  avgDps: number; bestDps: number;
+  monsters: { name: string; count: number; slain: number; bestSec: number | null }[]; // most hunted first
+}
+
+/** Totals over the saved hunts (newest 50). A monster counts as slain when its HP reached 0. */
+export function historyStats(records: HuntRecord[]): HistoryStats {
+  let totalSec = 0, selfDamage = 0, bestDps = 0;
+  const mons = new Map<string, HistoryStats['monsters'][number]>();
+  for (const r of records) {
+    const sec = r.snap.quest?.elapsedSec ?? 0;
+    const dmg = r.snap.party.find((m) => m.self)?.damage ?? 0;
+    totalSec += sec;
+    selfDamage += dmg;
+    if (sec > 0) bestDps = Math.max(bestDps, dmg / sec);
+    for (const m of r.snap.monsters) {
+      const e = mons.get(m.name) ?? { name: m.name, count: 0, slain: 0, bestSec: null };
+      e.count++;
+      if (m.hp <= 0) {
+        e.slain++;
+        if (sec > 0 && (e.bestSec == null || sec < e.bestSec)) e.bestSec = sec;
+      }
+      mons.set(m.name, e);
+    }
+  }
+  return {
+    hunts: records.length, totalSec, selfDamage,
+    avgDps: totalSec > 0 ? selfDamage / totalSec : 0, bestDps,
+    monsters: [...mons.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
   };
 }

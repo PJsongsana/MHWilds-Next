@@ -1,14 +1,14 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { Icon, iconFor, type IconName } from './icons';
 import {
-  buffViews, callouts, dpsSeries, elementRank, fmtInt, hpState, mmss, partViews, partyViews, pct, physTypeFor, physValue,
+  buffViews, callouts, dpsSeries, historyStats, elementRank, fmtInt, hpState, mmss, partViews, partyViews, pct, physTypeFor, physValue,
   pickMonster, questSummary, ratio, uptimeViews, weakSpots, WEAK_HITZONE,
   type Ailment, type Callout, type DamageSample, type Hitzone, type Link, type Monster, type PartView, type PhysType, type Scar,
-  type HuntRecord, type Snapshot, type Vitals,
+  type HuntRecord, type Profile, type Snapshot, type Vitals,
 } from './logic';
 import { mocks } from './mocks';
 import { useHistory } from './history';
-import { DEFAULT_SETTINGS, setSettings, useSettings, type PanelKey } from './settings';
+import { DEFAULT_SETTINGS, setSettings, useSettings, type PanelKey, type Tab } from './settings';
 import { t } from './strings';
 import { mockName, useHunt } from './useHunt';
 
@@ -40,9 +40,18 @@ const PARTY_COLORS = ['#5AA9E6', '#8FD3A8', '#B48BE8'];
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ');
 
 // Present only inside the desktop app (electron/preload.cjs).
+// SetupStatus = bridge/setup.js ensureSetup(): checks REFramework/_CatLib, installs our Lua.
+interface SetupStatus { gameDir: string | null; reframework: boolean; catlib: boolean; lua: 'current' | 'updated' | 'skipped' | 'error'; error?: string }
 declare global {
-  interface Window { huntApp?: { setDiscord(cfg: { enabled: boolean; clientId: string; port: number }): void } }
+  interface Window {
+    huntApp?: {
+      setDiscord(cfg: { enabled: boolean; clientId: string; port: number }): void;
+      getSetup(): Promise<SetupStatus>;
+    };
+  }
 }
+const REFRAMEWORK_URL = 'https://github.com/praydog/REFramework-nightly/releases';
+const CATLIB_URL = 'https://www.nexusmods.com/games/monsterhunterwilds/mods?keyword=CatLib';
 
 function useCanvas(scale: number) {
   const calc = () => {
@@ -68,16 +77,19 @@ export default function App() {
   const settings = useSettings();
   const { zoom, w, h, layout } = useCanvas(settings.scale);
   const [showSettings, setShowSettings] = useState(false);
+  const setup = useSetup();
   const inQuest = !!snap?.connected && !!snap.quest?.active;
   const { monster } = snap ? pickMonster(snap) : { monster: null };
   useAlertSound(inQuest && snap ? callouts(snap, monster) : [], settings.sound);
   useEffect(() => { window.huntApp?.setDiscord({ ...settings.discord, port: settings.port }); }, [settings.discord, settings.port]);
 
-  // S opens settings, Esc closes (spec §10: keyboard usable, nothing needed while playing)
+  // S opens settings, Esc closes, 1/2 switch tabs (spec §10: keyboard usable, nothing needed while playing)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setShowSettings(false);
-      else if (e.key.toLowerCase() === 's' && !(e.target instanceof HTMLInputElement)) setShowSettings((v) => !v);
+      if (e.target instanceof HTMLInputElement) return;
+      if (e.key.toLowerCase() === 's') setShowSettings((v) => !v);
+      else if (e.key === '1' || e.key === '2') setSettings({ tab: e.key === '1' ? 'hunt' : 'hunter' });
     };
     addEventListener('keydown', onKey);
     return () => removeEventListener('keydown', onKey);
@@ -86,8 +98,11 @@ export default function App() {
   return (
     <div className="h-full overflow-hidden">
       <div style={{ zoom, width: w, height: h }} className="flex flex-col gap-4 px-6 py-5 tabular-nums">
-        <Header snap={snap} link={link} onSettings={() => setShowSettings(true)} />
-        {link === 'connecting' ? (
+        <Header snap={snap} link={link} tab={settings.tab} onSettings={() => setShowSettings(true)} />
+        <SetupNotice {...setup} />
+        {settings.tab === 'hunter' ? (
+          <HunterView profile={snap?.connected ? snap.profile ?? null : null} layout={layout} />
+        ) : link === 'connecting' ? (
           <Center icon="clock" title={t.waitingBridge} sub={t.waitingBridgeHint} />
         ) : link === 'offline' ? (
           <Center icon="clock" title={t.waitingGame} sub={snap?.error} />
@@ -99,8 +114,64 @@ export default function App() {
           </div>
         )}
       </div>
-      {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
+      {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} setup={setup} />}
       {mockName && <MockSwitcher />}
+    </div>
+  );
+}
+
+/* ---------------------------------- setup ----------------------------------- */
+
+// Desktop app only: on start the app installs/updates our Lua and checks REFramework + _CatLib (the user installs those).
+function useSetup() {
+  const [status, setStatus] = useState<SetupStatus | null>(null);
+  const [seenUpdate, setSeenUpdate] = useState(false);
+  const check = () => { window.huntApp?.getSetup().then(setStatus).catch(() => {}); };
+  useEffect(check, []);
+  return { status, check, seenUpdate, dismiss: () => setSeenUpdate(true) };
+}
+type Setup = ReturnType<typeof useSetup>;
+const setupProblem = (s: SetupStatus) => !s.gameDir || !s.reframework || !s.catlib || s.lua === 'error';
+
+// Banner under the header: what's missing (with where to get it), or "reset scripts" after we updated the Lua.
+function SetupNotice({ status, check, seenUpdate, dismiss }: Setup) {
+  if (!status) return null;
+  const problem = setupProblem(status);
+  if (!problem && (status.lua !== 'updated' || seenUpdate)) return null;
+  return (
+    <div role="status" className={cx('flex shrink-0 flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border px-5 py-3 text-[15px]',
+      problem ? 'border-accent/60 bg-accent/10' : 'border-gold/40 bg-surface-2')}>
+      <Icon name={problem ? 'alert' : 'check'} size={22} className={problem ? 'text-accent' : 'text-gold'} />
+      {problem ? <SetupList status={status} compact /> : <span className="min-w-0 flex-1">{t.setup.reset}</span>}
+      <button type="button" onClick={problem ? check : dismiss}
+        className="rounded-lg border border-line px-3 py-1.5 text-sm hover:border-gold focus-visible:outline-2 focus-visible:outline-gold">
+        {problem ? t.setup.recheck : t.setup.dismiss}
+      </button>
+    </div>
+  );
+}
+
+function SetupList({ status: st, compact }: { status: SetupStatus; compact?: boolean }) {
+  const rows: [string, boolean, string, ReactNode?][] = [
+    [t.setup.game, !!st.gameDir, st.gameDir ?? t.setup.noGame],
+    [t.setup.reframework, st.reframework, st.reframework ? t.setup.ok : t.setup.missing,
+      <a href={REFRAMEWORK_URL} target="_blank" rel="noreferrer" className="text-gold-hi underline">{t.setup.getReframework}</a>],
+    [t.setup.catlib, st.catlib, st.catlib ? t.setup.ok : t.setup.missing,
+      <a href={CATLIB_URL} target="_blank" rel="noreferrer" className="text-gold-hi underline">{t.setup.getCatlib}</a>],
+    [t.setup.lua, st.lua === 'current' || st.lua === 'updated', `${t.setup.luaState[st.lua]}${st.error ? ` · ${st.error}` : ''}`],
+  ];
+  const shown = compact ? rows.filter(([, ok]) => !ok) : rows;
+  return (
+    <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+      {compact && <span className="text-ink-2">{t.setup.needs}</span>}
+      {shown.map(([name, ok, text, link]) => (
+        <div key={name} className="flex min-w-0 flex-wrap items-baseline gap-x-3 text-sm">
+          <span className={cx('size-2 shrink-0 self-center rounded-full', ok ? 'bg-ok' : 'bg-accent')} />
+          <b className="font-semibold">{name}</b>
+          <span className="min-w-0 truncate text-muted">{text}</span>
+          {!ok && link}
+        </div>
+      ))}
     </div>
   );
 }
@@ -296,7 +367,7 @@ function Center({ icon, title, sub }: { icon: IconName; title: string; sub?: str
 
 const LINK_DOT: Record<Link, string> = { live: 'bg-ok shadow-[0_0_8px_#5BC489]', stale: 'bg-accent', offline: 'bg-disabled', connecting: 'bg-disabled' };
 
-function Header({ snap, link, onSettings }: { snap: Snapshot | null; link: Link; onSettings: () => void }) {
+function Header({ snap, link, tab, onSettings }: { snap: Snapshot | null; link: Link; tab: Tab; onSettings: () => void }) {
   const q = snap?.connected ? snap.quest : undefined;
   const world = snap?.connected ? snap.world : null;
   return (
@@ -329,6 +400,15 @@ function Header({ snap, link, onSettings }: { snap: Snapshot | null; link: Link;
             <span className="text-lg font-semibold">{world.clock} {t.phase[world.phase]}</span>
           </Chip>
         )}
+        <nav aria-label={t.tabs.key} title={t.tabs.key} className="flex rounded-xl border border-line bg-surface/90 p-1">
+          {(['hunt', 'hunter'] as const).map((k) => (
+            <button key={k} type="button" onClick={() => setSettings({ tab: k })} aria-current={tab === k}
+              className={cx('rounded-lg px-4 py-2 font-display text-[15px] font-semibold focus-visible:outline-2 focus-visible:outline-gold',
+                tab === k ? 'bg-[#241C12] text-gold-hi' : 'text-muted hover:text-ink')}>
+              {t.tabs[k]}
+            </button>
+          ))}
+        </nav>
         <Chip className="gap-2">
           <span className={cx('size-2.5 rounded-full', LINK_DOT[link])} />
           <span className={cx('text-[15px]', link === 'stale' ? 'text-accent' : 'text-ink-2')}>{t.link[link]}</span>
@@ -956,12 +1036,80 @@ function SummaryView({ snap, samples, uptime }: { snap: Snapshot; samples: Damag
   );
 }
 
+/* ------------------------------- hunter tab ------------------------------- */
+
+const hms = (sec: number) => (sec >= 3600 ? `${Math.floor(sec / 3600)}:${mmss(sec % 3600).padStart(5, '0')}` : mmss(sec));
+
+// Separate from the hunt: who we are (HR, weapon, active skills from the game) + totals from our own hunt history.
+// Works without the game too (history is local). Gear / attack stats / save-data stats come in phase 2 (probe.lua).
+function HunterView({ profile, layout }: { profile: Profile | null; layout: Layout }) {
+  const st = historyStats(useHistory());
+  const portrait = layout === 'portrait';
+  return (
+    <div className={cx('grid min-h-0 flex-1 gap-4', portrait
+      ? 'grid-rows-[auto_minmax(0,1fr)_minmax(0,1fr)]'
+      : 'grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] grid-rows-[auto_minmax(0,1fr)]')}>
+      <Panel className="flex items-center gap-5 px-6 py-5">
+        <Tile icon="sword" size={64} className="border border-gold/40 bg-[#241C12] text-gold-hi" />
+        {profile ? (
+          <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-8 gap-y-1">
+            <span className="truncate font-display text-[28px] font-semibold">{profile.name || t.hunter.profile}</span>
+            {profile.hr != null && <span className="text-[15px] text-muted">{t.hunter.hr} <b className="font-deco text-[30px] text-gold-hi">{profile.hr}</b></span>}
+            {profile.weapon && <span className="text-[15px] text-muted">{t.hunter.weapon} <b className="text-lg text-ink">{profile.weapon.name || profile.weapon.type}</b></span>}
+          </div>
+        ) : <span className="text-[17px] text-ink-2">{t.hunter.noProfile}</span>}
+      </Panel>
+      <Panel className={cx('flex min-h-0 flex-col gap-4 px-6 py-5', !portrait && 'row-span-2')}>
+        <Eyebrow icon="star" right={profile && <span className="text-sm text-muted">{profile.skills.length}</span>}>{t.hunter.skills}</Eyebrow>
+        {!profile?.skills.length ? <span className="text-ink-2">{profile ? t.hunter.noSkills : t.hunter.noProfile}</span> : (
+          <ul className="grid min-h-0 grid-cols-[repeat(auto-fill,minmax(260px,1fr))] content-start gap-x-6 gap-y-2.5 overflow-y-auto pr-1">
+            {profile.skills.map((k) => (
+              <li key={k.id} className="flex items-center justify-between gap-3 rounded-lg bg-surface-2 px-3 py-2">
+                <span className="truncate text-[15px]">{k.name}</span>
+                <span className="flex shrink-0 items-center gap-1" aria-label={`Lv ${k.lv}${k.max ? ` / ${k.max}` : ''}`}>
+                  {Array.from({ length: Math.max(k.lv, k.max || 0) }, (_, i) => (
+                    <span key={i} className={cx('h-3.5 w-2 rounded-sm', i < k.lv ? 'bg-gold-hi' : 'bg-track')} />
+                  ))}
+                  <b className="ml-1.5 w-6 text-right text-sm">{k.lv}</b>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Panel>
+      <Panel className={cx('flex min-h-0 flex-col gap-4 px-6 py-5', !portrait && 'col-start-1 row-start-2')}>
+        <Eyebrow icon="target">{t.hunter.stats}</Eyebrow>
+        {st.hunts === 0 ? <span className="text-ink-2">{t.hunter.noHistory}</span> : <>
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
+            {([[t.hunter.hunts, String(st.hunts)], [t.hunter.totalTime, hms(st.totalSec)], [t.hunter.totalDamage, fmtInt(st.selfDamage)],
+              [t.hunter.avgDps, st.avgDps.toFixed(1)], [t.hunter.bestDps, st.bestDps.toFixed(1)]] as const).map(([k, v]) => (
+              <div key={k} className="flex flex-col rounded-xl border border-line bg-surface-2 px-4 py-2.5">
+                <span className="text-[13px] text-muted">{k}</span><b className="text-2xl">{v}</b>
+              </div>
+            ))}
+          </div>
+          <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_repeat(3,auto)] content-start gap-x-6 gap-y-2 overflow-y-auto pr-1 text-[15px]">
+            {[t.hunter.monster, t.hunter.count, t.hunter.slain, t.hunter.best].map((h) => <span key={h} className="text-[13px] text-muted">{h}</span>)}
+            {st.monsters.map((m) => [
+              <span key={`n${m.name}`} className="truncate font-display font-semibold">{m.name}</span>,
+              <span key={`c${m.name}`} className="text-right">{m.count}</span>,
+              <span key={`s${m.name}`} className="text-right">{m.slain}</span>,
+              <span key={`b${m.name}`} className="text-right">{m.bestSec != null ? mmss(m.bestSec) : '—'}</span>,
+            ])}
+          </div>
+          <span className="text-xs text-muted">{t.hunter.statsNote(st.hunts)}</span>
+        </>}
+      </Panel>
+    </div>
+  );
+}
+
 /* --------------------------------- settings --------------------------------- */
 
 const PANEL_KEYS: PanelKey[] = ['now', 'parts', 'ailments', 'buffs', 'damage'];
 
 // Opened with the gear button or S; every control is a native input, so it works with the keyboard.
-function SettingsDialog({ onClose }: { onClose: () => void }) {
+function SettingsDialog({ onClose, setup }: { onClose: () => void; setup: Setup }) {
   const s = useSettings();
   const first = useRef<HTMLInputElement>(null);
   useEffect(() => { first.current?.focus(); }, []);
@@ -997,10 +1145,17 @@ function SettingsDialog({ onClose }: { onClose: () => void }) {
             <label className="flex items-center justify-between gap-4">
               <span>{t.settings.discordId}</span>
               <input type="text" inputMode="numeric" value={s.discord.clientId} placeholder="1234567890123456789"
-                onChange={(e) => setSettings({ discord: { ...s.discord, clientId: e.target.value.replace(/D/g, '') } })}
+                onChange={(e) => setSettings({ discord: { ...s.discord, clientId: e.target.value.replace(/\D/g, '') } })}
                 className="w-52 rounded-lg border border-line bg-surface-2 px-3 py-1.5 text-right" />
             </label>
             <p className="text-xs text-muted">{t.settings.discordHint}</p>
+          </fieldset>
+        )}
+        {setup.status && (
+          <fieldset className="flex flex-col gap-2">
+            <legend className="mb-1 text-muted">{t.setup.title}</legend>
+            <SetupList status={setup.status} />
+            <button type="button" onClick={setup.check} className="self-start text-sm text-muted underline hover:text-ink">{t.setup.recheck}</button>
           </fieldset>
         )}
         <fieldset className="flex flex-col gap-2">

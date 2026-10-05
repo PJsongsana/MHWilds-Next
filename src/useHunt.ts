@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { addHunt } from './history';
-import { addUptime, compactRecord, linkState, normalize, type DamageSample, type HuntRecord, type Link, type Snapshot } from './logic';
+import { addUptime, compactRecord, keepMonsters, linkState, normalize, type DamageSample, type HuntRecord, type Link, type Snapshot } from './logic';
 import { mocks } from './mocks';
 import { useSettings } from './settings';
 
@@ -80,7 +80,7 @@ export function useHunt(): HuntState {
         if (prev) addUptime(uptime.current, s.player.buffs, t - prev.t);
         samples.current = [...samples.current.slice(-MAX_SAMPLES + 1), { t, ...partyTotals(s) }];
       }
-      lastActive.current = s;
+      lastActive.current = keepMonsters(lastActive.current, s);
     } else if (lastActive.current) {
       setSummary({ snap: lastActive.current, samples: samples.current, uptime: uptime.current });
       addHunt(compactRecord(lastActive.current, samples.current, uptime.current, Date.now()));

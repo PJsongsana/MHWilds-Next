@@ -289,6 +289,8 @@ local function readMonster(enemy)
     }
     local rate = safe(function() return ctx.Dying:get_CaptureVitalRate() end)
     if type(rate) == "number" and rate > 0 and rate < 1 then m.captureThreshold = rate end
+    -- captured monsters keep HP > 0; Overlay boss/draw.lua uses the same getter
+    m.captured = safe(function() return ctx:get_Browser():get_IsCapture() end) == true or nil
     m.crown = CROWNS[safe(function() return ctx:get_Browser():checkCrownType() end) or 0]
     m.sizePct = safe(sizePct, ctx)
     m.scars = try("scars", readScars, ctx, emID)

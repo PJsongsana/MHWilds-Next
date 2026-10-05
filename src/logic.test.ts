@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import {
   buffViews, callouts, elementRank, hpState, linkState, mmss, normalize, partViews, partyViews, pct, physTypeFor, pickMonster,
-  weakSpots, dpsSeries, questSummary, addUptime, uptimeViews, compactRecord, historyStats, type Hitzone, type Monster,
+  weakSpots, dpsSeries, questSummary, addUptime, uptimeViews, compactRecord, historyStats, keepMonsters, type Hitzone, type Monster,
 } from './logic';
 
 const hz = (name: string, slash: number, blow: number, shot: number, fire = 0, ice = 0): Hitzone =>
@@ -63,6 +63,7 @@ test('hp state uses threshold, default 0.20', () => {
   expect(hpState({ ...m, hp: 21 })).toBe('normal');
   expect(hpState({ ...m, hp: 25, captureThreshold: 0.3 })).toBe('capture');
   expect(hpState({ ...m, hp: 0 })).toBe('done');
+  expect(hpState({ ...m, captured: true })).toBe('done');
 });
 
 test('buffs: expired removed, ≤30s warn, null infinite', () => {
@@ -172,4 +173,12 @@ test('history stats: totals, best DPS, monsters by count with fastest slay', () 
 test('profile: missing → null, skills always an array', () => {
   expect(normalize({}).profile).toBeNull();
   expect(normalize({ profile: { hr: 7, skills: {} } }).profile).toEqual({ hr: 7, skills: [] });
+});
+
+test('quest end: an empty monster list keeps the last one', () => {
+  const withMon = normalize({ connected: true, monsters: [{ id: 'm', name: 'x', hp: 0, hpMax: 1 }] });
+  const empty = normalize({ connected: true, monsters: [] });
+  expect(keepMonsters(withMon, empty).monsters.map((m) => m.name)).toEqual(['x']);
+  expect(keepMonsters(null, empty).monsters).toEqual([]);
+  expect(keepMonsters(empty, withMon)).toBe(withMon);
 });

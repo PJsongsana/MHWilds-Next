@@ -10,7 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startBridge } from '../bridge/server.js';
 import { ensureSetup } from '../bridge/setup.js';
-import { configureDiscord, shutdownDiscord } from './discord.mjs';
+import { configureDiscord, discordStatus, onDiscordStatus, shutdownDiscord } from './discord.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dev = process.argv.includes('--dev');
@@ -72,6 +72,9 @@ app.whenReady().then(() => {
   });
 
   ipcMain.on('discord:configure', (_e, cfg) => configureDiscord(cfg));
+  // what Discord currently shows, for the page (status chip + settings)
+  ipcMain.handle('discord:status', () => discordStatus());
+  onDiscordStatus((st) => { if (!win.isDestroyed()) win.webContents.send('discord:status', st); });
   // install/update our Lua in the game folder and report REFramework/_CatLib (also the page's "check again" button)
   ipcMain.handle('setup:get', () => ensureSetup(luaSrc()));
   // links on the page (setup help) open in the browser, never in a new app window; https only

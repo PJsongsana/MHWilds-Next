@@ -7,6 +7,7 @@ import {
   type HuntRecord, type Profile, type Snapshot, type Vitals,
 } from './logic';
 import { mocks } from './mocks';
+import DISCORD_TEXT from '../electron/presence-text.json'; // the default wording, shared with the desktop app
 import { useHistory } from './history';
 import { DEFAULT_SETTINGS, setSettings, useSettings, type PanelKey, type Tab } from './settings';
 import { t } from './strings';
@@ -41,12 +42,16 @@ const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).jo
 
 // Present only inside the desktop app (electron/preload.cjs).
 // SetupStatus = bridge/setup.js ensureSetup(): checks REFramework/_CatLib, installs our Lua.
+// What the Discord presence currently shows (electron/discord.mjs)
+interface DiscordStatus { state: 'off' | 'connecting' | 'live' | 'error'; details?: string | null; line2?: string | null }
 interface SetupStatus { gameDir: string | null; reframework: boolean; catlib: boolean; lua: 'current' | 'updated' | 'skipped' | 'error'; error?: string }
 declare global {
   interface Window {
     huntApp?: {
-      setDiscord(cfg: { enabled: boolean; clientId: string; port: number }): void;
+      setDiscord(cfg: { enabled: boolean; clientId: string; text: Record<string, string>; port: number }): void;
       getSetup(): Promise<SetupStatus>;
+      getDiscordStatus(): Promise<DiscordStatus>;
+      onDiscordStatus(cb: (st: DiscordStatus) => void): () => void;
     };
   }
 }
@@ -78,6 +83,7 @@ export default function App() {
   const { zoom, w, h, layout } = useCanvas(settings.scale);
   const [showSettings, setShowSettings] = useState(false);
   const setup = useSetup();
+  const discord = useDiscordStatus();
   const inQuest = !!snap?.connected && !!snap.quest?.active;
   const { monster } = snap ? pickMonster(snap) : { monster: null };
   useAlertSound(inQuest && snap ? callouts(snap, monster) : [], settings.sound);
@@ -98,7 +104,7 @@ export default function App() {
   return (
     <div className="h-full overflow-hidden">
       <div style={{ zoom, width: w, height: h }} className="flex flex-col gap-4 px-6 py-5 tabular-nums">
-        <Header snap={snap} link={link} tab={settings.tab} onSettings={() => setShowSettings(true)} />
+        <Header snap={snap} link={link} tab={settings.tab} discord={discord} onSettings={() => setShowSettings(true)} />
         <SetupNotice {...setup} />
         {settings.tab === 'hunter' ? (
           <HunterView profile={snap?.connected ? snap.profile ?? null : null} layout={layout} />
@@ -114,7 +120,7 @@ export default function App() {
           </div>
         )}
       </div>
-      {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} setup={setup} />}
+      {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} setup={setup} discord={discord} />}
       {mockName && <MockSwitcher />}
     </div>
   );
@@ -173,6 +179,36 @@ function SetupList({ status: st, compact }: { status: SetupStatus; compact?: boo
         </div>
       ))}
     </div>
+  );
+}
+
+/* --------------------------------- discord ---------------------------------- */
+
+function useDiscordStatus() {
+  const [st, setSt] = useState<DiscordStatus>({ state: 'off' });
+  useEffect(() => {
+    const app = window.huntApp;
+    if (!app) return;
+    app.getDiscordStatus().then(setSt).catch(() => {});
+    return app.onDiscordStatus(setSt);
+  }, []);
+  return st;
+}
+
+const DISCORD_DOT: Record<DiscordStatus['state'], string> = { live: 'bg-[#5865F2]', connecting: 'bg-disabled', error: 'bg-accent', off: 'bg-disabled' };
+
+// Header chip: what friends see in the member list right now (line 2), full text on hover
+function DiscordChip({ st }: { st: DiscordStatus }) {
+  if (st.state === 'off') return null;
+  const text = st.state === 'live' ? st.line2 ?? t.settings.discordNothing : t.settings.discordStatus[st.state];
+  return (
+    <Chip className="max-w-80 gap-2">
+      <span className={cx('size-2.5 shrink-0 rounded-full', DISCORD_DOT[st.state])} />
+      <span className="flex min-w-0 flex-col leading-tight" title={[st.details, st.line2].filter(Boolean).join('\n') || text}>
+        <span className="text-[11px] tracking-wide text-muted">Discord</span>
+        <span className={cx('truncate text-[15px]', st.state === 'error' ? 'text-accent' : 'text-ink-2')}>{text}</span>
+      </span>
+    </Chip>
   );
 }
 
@@ -367,7 +403,7 @@ function Center({ icon, title, sub }: { icon: IconName; title: string; sub?: str
 
 const LINK_DOT: Record<Link, string> = { live: 'bg-ok shadow-[0_0_8px_#5BC489]', stale: 'bg-accent', offline: 'bg-disabled', connecting: 'bg-disabled' };
 
-function Header({ snap, link, tab, onSettings }: { snap: Snapshot | null; link: Link; tab: Tab; onSettings: () => void }) {
+function Header({ snap, link, tab, discord, onSettings }: { snap: Snapshot | null; link: Link; tab: Tab; discord: DiscordStatus; onSettings: () => void }) {
   const q = snap?.connected ? snap.quest : undefined;
   const world = snap?.connected ? snap.world : null;
   return (
@@ -400,6 +436,7 @@ function Header({ snap, link, tab, onSettings }: { snap: Snapshot | null; link: 
             <span className="text-lg font-semibold">{world.clock} {t.phase[world.phase]}</span>
           </Chip>
         )}
+        <DiscordChip st={discord} />
         <nav aria-label={t.tabs.key} title={t.tabs.key} className="flex rounded-xl border border-line bg-surface/90 p-1">
           {(['hunt', 'hunter'] as const).map((k) => (
             <button key={k} type="button" onClick={() => setSettings({ tab: k })} aria-current={tab === k}
@@ -1088,7 +1125,7 @@ function HunterView({ profile, layout }: { profile: Profile | null; layout: Layo
               </div>
             ))}
           </div>
-          <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_repeat(3,auto)] content-start gap-x-6 gap-y-2 overflow-y-auto pr-1 text-[15px]">
+          {st.monsters.length > 0 && <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_repeat(3,auto)] content-start gap-x-6 gap-y-2 overflow-y-auto pr-1 text-[15px]">
             {[t.hunter.monster, t.hunter.count, t.hunter.slain, t.hunter.best].map((h) => <span key={h} className="text-[13px] text-muted">{h}</span>)}
             {st.monsters.map((m) => [
               <span key={`n${m.name}`} className="truncate font-display font-semibold">{m.name}</span>,
@@ -1096,7 +1133,7 @@ function HunterView({ profile, layout }: { profile: Profile | null; layout: Layo
               <span key={`s${m.name}`} className="text-right">{m.slain}</span>,
               <span key={`b${m.name}`} className="text-right">{m.bestSec != null ? mmss(m.bestSec) : '—'}</span>,
             ])}
-          </div>
+          </div>}
           <span className="text-xs text-muted">{t.hunter.statsNote(st.hunts)}</span>
         </>}
       </Panel>
@@ -1109,14 +1146,14 @@ function HunterView({ profile, layout }: { profile: Profile | null; layout: Layo
 const PANEL_KEYS: PanelKey[] = ['now', 'parts', 'ailments', 'buffs', 'damage'];
 
 // Opened with the gear button or S; every control is a native input, so it works with the keyboard.
-function SettingsDialog({ onClose, setup }: { onClose: () => void; setup: Setup }) {
+function SettingsDialog({ onClose, setup, discord }: { onClose: () => void; setup: Setup; discord: DiscordStatus }) {
   const s = useSettings();
   const first = useRef<HTMLInputElement>(null);
   useEffect(() => { first.current?.focus(); }, []);
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
       <div role="dialog" aria-modal="true" aria-label={t.settings.title} onClick={(e) => e.stopPropagation()}
-        className="wilds-panel flex w-full max-w-md flex-col gap-5 p-6 text-[15px]">
+        className="wilds-panel flex max-h-[92vh] w-full max-w-md flex-col gap-5 overflow-y-auto p-6 text-[15px]">
         <Eyebrow icon="gear">{t.settings.title}</Eyebrow>
         <label className="flex items-center justify-between gap-4">
           <span>{t.settings.port}</span>
@@ -1148,7 +1185,32 @@ function SettingsDialog({ onClose, setup }: { onClose: () => void; setup: Setup 
                 onChange={(e) => setSettings({ discord: { ...s.discord, clientId: e.target.value.replace(/\D/g, '') } })}
                 className="w-52 rounded-lg border border-line bg-surface-2 px-3 py-1.5 text-right" />
             </label>
+            <div className="flex flex-col gap-0.5 rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm">
+              <span className="flex items-center gap-2 text-muted">
+                <span className={cx('size-2 rounded-full', DISCORD_DOT[discord.state])} />{t.settings.discordStatus[discord.state]}
+              </span>
+              {discord.state === 'live' && <>
+                <b className="font-semibold">{discord.details ?? '—'}</b>
+                <span className="text-ink-2">{discord.line2 ?? t.settings.discordNothing}</span>
+              </>}
+            </div>
             <p className="text-xs text-muted">{t.settings.discordHint}</p>
+            <details className="flex flex-col gap-2">
+              <summary className="cursor-pointer text-sm text-ink-2 hover:text-ink">{t.settings.discordText}</summary>
+              <p className="mt-2 text-xs text-muted">{t.settings.discordTextHint}</p>
+              <div className="mt-2 flex flex-col gap-2">
+                {Object.entries(DISCORD_TEXT).map(([k, def]) => (
+                  <label key={k} className="flex items-center justify-between gap-3 text-sm">
+                    <span className="shrink-0 text-ink-2">{t.settings.discordTextKey[k] ?? k}</span>
+                    <input id={`discord-text-${k}`} type="text" value={s.discord.text[k] ?? ''} placeholder={def} maxLength={100}
+                      onChange={(e) => setSettings({ discord: { ...s.discord, text: { ...s.discord.text, [k]: e.target.value } } })}
+                      className="w-60 min-w-0 rounded-lg border border-line bg-surface-2 px-3 py-1.5" />
+                  </label>
+                ))}
+                <button type="button" onClick={() => setSettings({ discord: { ...s.discord, text: {} } })}
+                  className="self-start text-xs text-muted underline hover:text-ink">{t.settings.discordTextReset}</button>
+              </div>
+            </details>
           </fieldset>
         )}
         {setup.status && (

@@ -9,7 +9,8 @@ export interface Settings {
   scale: number; // multiplies the auto-fit zoom
   sound: boolean;
   panels: Record<PanelKey, boolean>;
-  discord: { enabled: boolean; clientId: string }; // desktop app only
+  // desktop app only; text = the user's wording for line 2 (empty/missing key = default, see electron/presence-text.json)
+  discord: { enabled: boolean; clientId: string; text: Record<string, string> };
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -18,7 +19,7 @@ export const DEFAULT_SETTINGS: Settings = {
   scale: 1,
   sound: false, // browsers only allow audio after a click, so it's opt-in from the settings screen
   panels: { now: true, parts: true, ailments: true, buffs: true, damage: true },
-  discord: { enabled: false, clientId: '' },
+  discord: { enabled: false, clientId: '', text: {} },
 };
 
 const KEY = 'hunt-dashboard-settings';

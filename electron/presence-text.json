@@ -1,0 +1,10 @@
+{
+  "hunt": "ล่า {monster}",
+  "enraged": "{monster} โกรธอยู่",
+  "ailment": "{monster} {ailment}",
+  "dead": "{monster} ตายแล้ว",
+  "captured": "จับ {monster} แล้ว",
+  "quest": "อยู่ในเควส",
+  "camp": "อยู่ที่แคมป์",
+  "recent": "เพิ่งล่า {monster} สำเร็จ · {time}"
+}

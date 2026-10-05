@@ -26,7 +26,9 @@ export function ensureSetup(luaSrc, gameDir = findGameDir()) {
       if (!fs.statSync(from).isFile()) continue;
       const to = path.join(rf, rel);
       const data = fs.readFileSync(from);
-      if (fs.existsSync(to) && fs.readFileSync(to).equals(data)) continue;
+      // same text with other line endings (git on Windows converts them) is not an update
+      const text = (b) => b.toString('utf8').replace(/\r\n/g, '\n');
+      if (fs.existsSync(to) && text(fs.readFileSync(to)) === text(data)) continue;
       fs.mkdirSync(path.dirname(to), { recursive: true });
       fs.writeFileSync(to, data);
       copied++;

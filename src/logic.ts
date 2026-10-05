@@ -14,7 +14,7 @@ export interface Scar { part?: string | null; partId?: string; state: 'tear' | '
 export interface Monster {
   id: string; name: string; hp: number; hpMax: number;
   captureThreshold?: number | null; sizePct?: number | null; crown?: Crown;
-  enraged?: boolean; enrageRemainSec?: number | null; wounds?: number | null;
+  enraged?: boolean; enrageRemainSec?: number | null; wounds?: number | null; captured?: boolean;
   parts: Part[]; ailments: Ailment[]; hitzones: Hitzone[]; scars: Scar[];
 }
 export interface Buff { id: string; name: string; remainSec: number | null; kind?: 'mantle' | 'song'; cooldown?: boolean }
@@ -65,7 +65,7 @@ export function pickMonster(s: Snapshot): { monster: Monster | null; others: num
 
 export type HpState = 'normal' | 'capture' | 'done';
 export function hpState(m: Monster): HpState {
-  if (m.hp <= 0) return 'done';
+  if (m.hp <= 0 || m.captured) return 'done';
   return ratio(m.hp, m.hpMax) <= (m.captureThreshold ?? DEFAULT_CAPTURE) ? 'capture' : 'normal';
 }
 
@@ -255,6 +255,11 @@ export function addUptime(acc: Record<string, { name: string; sec: number }>, bu
 export const uptimeViews = (acc: Record<string, { name: string; sec: number }>, elapsedSec: number) =>
   Object.entries(acc).map(([id, e]) => ({ id, name: e.name, pct: pct(e.sec, elapsedSec) })).sort((a, b) => b.pct - a.pct);
 
+/** Near a quest's end (reward countdown) the game's monster list is already empty while the quest is still
+ *  active: keep the last list that had monsters, so the summary/history show what was hunted. */
+export const keepMonsters = (prev: Snapshot | null, s: Snapshot): Snapshot =>
+  s.monsters.length || !prev?.monsters.length ? s : { ...s, monsters: prev.monsters };
+
 export interface HuntRecord {
   id: string;
   endedAt: number;
@@ -292,7 +297,7 @@ export interface HistoryStats {
   monsters: { name: string; count: number; slain: number; bestSec: number | null }[]; // most hunted first
 }
 
-/** Totals over the saved hunts (newest 50). A monster counts as slain when its HP reached 0. */
+/** Totals over the saved hunts (newest 50). A monster counts as slain when its HP reached 0 or it was captured. */
 export function historyStats(records: HuntRecord[]): HistoryStats {
   let totalSec = 0, selfDamage = 0, bestDps = 0;
   const mons = new Map<string, HistoryStats['monsters'][number]>();
@@ -305,7 +310,7 @@ export function historyStats(records: HuntRecord[]): HistoryStats {
     for (const m of r.snap.monsters) {
       const e = mons.get(m.name) ?? { name: m.name, count: 0, slain: 0, bestSec: null };
       e.count++;
-      if (m.hp <= 0) {
+      if (hpState(m) === 'done') {
         e.slain++;
         if (sec > 0 && (e.bestSec == null || sec < e.bestSec)) e.bestSec = sec;
       }

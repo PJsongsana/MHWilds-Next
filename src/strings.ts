@@ -74,6 +74,18 @@ export const t = {
     reset: 'คืนค่าเริ่มต้น',
     discord: 'แสดงสถานะการล่าใน Discord',
     discordId: 'Application ID',
+    discordStatus: {
+      off: 'ปิดอยู่', connecting: 'กำลังเชื่อม Discord…', live: 'กำลังโชว์ใน Discord',
+      error: 'เชื่อม Discord ไม่ได้ · เปิด Discord บนเครื่องนี้ หรือเช็ค Application ID',
+    } as Record<string, string>,
+    discordNothing: 'ยังไม่มีข้อมูลจากเกม',
+    discordText: 'แก้ข้อความที่โชว์',
+    discordTextHint: '{monster} = ชื่อมอน · {ailment} = สถานะ · {time} = เวลาเควส · HP ต่อท้ายให้เอง · เว้นว่าง = ค่าเดิม',
+    discordTextReset: 'คืนข้อความเดิมทั้งหมด',
+    discordTextKey: {
+      hunt: 'กำลังล่า', enraged: 'มอนโกรธ', ailment: 'มอนติดสถานะ', dead: 'มอนตาย',
+      captured: 'จับมอนได้', quest: 'ในเควส ยังไม่เจอมอน', camp: 'อยู่แคมป์', recent: 'หลังจบเควส',
+    } as Record<string, string>,
     discordHint: 'สร้างที่ discord.com/developers → New Application แล้ว copy Application ID มาใส่ · ต้องเปิด Discord บนเครื่องนี้',
     close: 'ปิด (Esc)',
     hint: 'กด S เพื่อเปิด/ปิดหน้านี้ · ค่าถูกบันทึกในเครื่องนี้',

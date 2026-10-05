@@ -4,4 +4,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('huntApp', {
   setDiscord: (cfg) => ipcRenderer.send('discord:configure', cfg),
   getSetup: () => ipcRenderer.invoke('setup:get'),
+  getDiscordStatus: () => ipcRenderer.invoke('discord:status'),
+  onDiscordStatus: (cb) => {
+    const handler = (_e, st) => cb(st);
+    ipcRenderer.on('discord:status', handler);
+    return () => ipcRenderer.removeListener('discord:status', handler);
+  },
 });

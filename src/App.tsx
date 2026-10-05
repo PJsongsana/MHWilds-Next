@@ -8,6 +8,8 @@ import {
 } from './logic';
 import { mocks } from './mocks';
 import DISCORD_TEXT from '../electron/presence-text.json'; // the default wording, shared with the desktop app
+import CHANGELOG from '../CHANGELOG.md?raw';
+import { version as APP_VERSION } from '../package.json';
 import { useHistory } from './history';
 import { DEFAULT_SETTINGS, setSettings, useSettings, type PanelKey, type Tab } from './settings';
 import { t } from './strings';
@@ -202,11 +204,11 @@ function DiscordChip({ st }: { st: DiscordStatus }) {
   if (st.state === 'off') return null;
   const text = st.state === 'live' ? st.line2 ?? t.settings.discordNothing : t.settings.discordStatus[st.state];
   return (
-    <Chip className="max-w-80 gap-2">
+    <Chip className="max-w-64 gap-2.5">
       <span className={cx('size-2.5 shrink-0 rounded-full', DISCORD_DOT[st.state])} />
       <span className="flex min-w-0 flex-col leading-tight" title={[st.details, st.line2].filter(Boolean).join('\n') || text}>
-        <span className="text-[11px] tracking-wide text-muted">Discord</span>
-        <span className={cx('truncate text-[15px]', st.state === 'error' ? 'text-accent' : 'text-ink-2')}>{text}</span>
+        <span className="text-[10px] tracking-[1.5px] text-muted uppercase">Discord</span>
+        <span className={cx('truncate text-sm', st.state === 'error' ? 'text-accent' : 'text-ink-2')}>{text}</span>
       </span>
     </Chip>
   );
@@ -284,7 +286,7 @@ function Dashboard({ snap, layout, samples }: { snap: Snapshot; layout: Layout; 
   const cols = ['440px', panels.parts && 'minmax(0,1fr)', panels.ailments && (panels.parts ? '360px' : 'minmax(0,1fr)')].filter(Boolean).join(' ');
   const monsters = !multi ? (
     <div className="grid min-h-0 flex-1 gap-4" style={{ gridTemplateColumns: cols }}>
-      <MonsterCard monster={monster} phys={phys} ringZoom={wide ? 0.9 : 0.66} />
+      <MonsterCard monster={monster} phys={phys} ringZoom={wide ? 1.1 : 0.9} />
       {panels.parts && <PartsPanel monster={monster} phys={phys} />}
       {panels.ailments && <AilmentsPanel ailments={monster?.ailments ?? []} />}
     </div>
@@ -345,7 +347,7 @@ function PlayerBlock({ snap, samples, direction, fitContent }: { snap: Snapshot;
   }
   const both = panels.buffs && panels.damage;
   return (
-    <div className={cx('grid shrink-0 gap-4', both ? 'grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]' : 'grid-cols-1', fitContent ? 'items-start' : 'h-[190px]')}>
+    <div className={cx('grid shrink-0 gap-4', both ? 'grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]' : 'grid-cols-1', !fitContent && 'h-[190px]')}>
       {buffs}{damage}
     </div>
   );
@@ -407,48 +409,53 @@ function Header({ snap, link, tab, discord, onSettings }: { snap: Snapshot | nul
   const q = snap?.connected ? snap.quest : undefined;
   const world = snap?.connected ? snap.world : null;
   return (
-    <header className="flex min-h-14 shrink-0 flex-wrap items-center justify-between gap-x-6 gap-y-3">
-      <div className="flex min-w-0 items-center gap-4">
-        <div className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-gold-hi/40 bg-linear-to-br from-gold-hi to-gold text-on-accent shadow-[0_0_16px_rgb(200_169_106/0.3)]">
+    // one row: title takes what's left (truncates); every control on the right is the same 48px tall
+    <header className="flex min-h-12 shrink-0 flex-wrap items-center justify-between gap-x-5 gap-y-3">
+      <div className="flex min-w-0 flex-1 basis-64 items-center gap-3.5">
+        <div className="flex size-12 shrink-0 items-center justify-center rounded-xl border border-gold-hi/40 bg-linear-to-br from-gold-hi to-gold text-on-accent shadow-[0_0_16px_rgb(200_169_106/0.3)]">
           <Icon name="claw" size={26} stroke={2.2} />
         </div>
         <div className="flex min-w-0 flex-col">
-          <div className="font-deco text-xs tracking-[4px] text-gold">{t.brand}</div>
-          <div className="truncate font-display text-[21px] font-semibold">
-            {q?.active ? `${q.name || t.quest} · ${t.hunting(snap!.monsters.length)}` : t.notInQuest}
+          <div className="font-deco text-[11px] tracking-[4px] text-gold">{t.brand}</div>
+          <div className="truncate font-display text-xl font-semibold">
+            {tab === 'hunter' ? t.tabs.hunter : q?.active ? `${q.name || t.quest} · ${t.hunting(snap!.monsters.length)}` : t.notInQuest}
           </div>
         </div>
       </div>
-      <div className="flex shrink-0 items-center gap-3">
-        {q?.active && (
-          <Chip className="py-2">
-            <Icon name="clock" size={22} stroke={1.8} className="text-muted" />
-            <span className="text-[28px] font-bold">{mmss(q.elapsedSec)}</span>
-            <div className="flex flex-col text-[13px] leading-tight text-muted">
-              {q.limitSec > 0 && <span>/ {mmss(q.limitSec)}</span>}
-              {q.remainSec != null && q.remainSec > 0 && <span className="text-ink-2">{t.questRemain(mmss(q.remainSec))}</span>}
-            </div>
-          </Chip>
-        )}
-        {world && (
-          <Chip>
-            <Icon name={world.phase === 'night' || world.phase === 'dusk' ? 'moon' : 'sun'} size={20} stroke={1.8} className="text-moon" />
-            <span className="text-lg font-semibold">{world.clock} {t.phase[world.phase]}</span>
+      <div className="flex shrink-0 items-center gap-2.5">
+        {(q?.active || world) && (
+          // quest time and the in-game clock share one chip
+          <Chip className="gap-3">
+            {q?.active && <>
+              <span className="text-[26px] font-bold tracking-tight">{mmss(q.elapsedSec)}</span>
+              <span className="flex flex-col text-xs leading-tight text-muted">
+                {q.limitSec > 0 && <span>/ {mmss(q.limitSec)}</span>}
+                {q.remainSec != null && q.remainSec > 0 && <span className="text-ink-2">{t.questRemain(mmss(q.remainSec))}</span>}
+              </span>
+            </>}
+            {q?.active && world && <span className="h-7 w-px bg-line" />}
+            {world && (
+              <span className="flex items-center gap-1.5" title={t.phase[world.phase]}>
+                <Icon name={world.phase === 'night' || world.phase === 'dusk' ? 'moon' : 'sun'} size={18} stroke={1.8} className="text-moon" />
+                <span className="text-[15px] font-semibold">{world.clock}</span>
+              </span>
+            )}
           </Chip>
         )}
         <DiscordChip st={discord} />
-        <nav aria-label={t.tabs.key} title={t.tabs.key} className="flex rounded-xl border border-line bg-surface/90 p-1">
-          {(['hunt', 'hunter'] as const).map((k) => (
+        <nav aria-label={t.tabs.key} title={t.tabs.key} className="flex h-12 items-center rounded-xl border border-line bg-surface/90 p-1">
+          {(['hunt', 'hunter'] as const).map((k, i) => (
             <button key={k} type="button" onClick={() => setSettings({ tab: k })} aria-current={tab === k}
-              className={cx('rounded-lg px-4 py-2 font-display text-[15px] font-semibold focus-visible:outline-2 focus-visible:outline-gold',
-                tab === k ? 'bg-[#241C12] text-gold-hi' : 'text-muted hover:text-ink')}>
-              {t.tabs[k]}
+              className={cx('flex h-full items-center gap-1.5 rounded-lg px-3.5 font-display text-[15px] font-semibold focus-visible:outline-2 focus-visible:outline-gold',
+                tab === k ? 'bg-[#2A2014] text-gold-hi shadow-[inset_0_0_0_1px_rgb(200_169_106/0.35)]' : 'text-muted hover:text-ink')}>
+              {t.tabs[k]}<kbd className="font-sans text-[10px] font-normal text-muted">{i + 1}</kbd>
             </button>
           ))}
         </nav>
-        <Chip className="gap-2">
-          <span className={cx('size-2.5 rounded-full', LINK_DOT[link])} />
-          <span className={cx('text-[15px]', link === 'stale' ? 'text-accent' : 'text-ink-2')}>{t.link[link]}</span>
+        {/* connection: just a dot while all is well, spelled out when it isn't */}
+        <Chip className={cx('gap-2', link === 'live' && 'w-12 justify-center px-0')}>
+          <span className={cx('size-2.5 shrink-0 rounded-full', LINK_DOT[link])} title={t.link[link]} aria-label={t.link[link]} role="img" />
+          {link !== 'live' && <span className={cx('text-sm whitespace-nowrap', link === 'stale' ? 'text-accent' : 'text-ink-2')}>{t.link[link]}</span>}
         </Chip>
         <button type="button" onClick={onSettings} title={t.settings.open} aria-label={t.settings.open}
           className="flex size-12 items-center justify-center rounded-xl border border-line bg-surface/90 text-muted hover:border-gold hover:text-gold-hi focus-visible:outline-2 focus-visible:outline-gold">
@@ -460,7 +467,7 @@ function Header({ snap, link, tab, discord, onSettings }: { snap: Snapshot | nul
 }
 
 function Chip({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={cx('flex items-center gap-2.5 rounded-xl border border-line bg-surface/90 px-4 py-3 shadow-[inset_0_1px_0_rgb(230_204_143/0.07)]', className)}>{children}</div>;
+  return <div className={cx('flex h-12 items-center gap-2.5 rounded-xl border border-line bg-surface/90 px-4 shadow-[inset_0_1px_0_rgb(230_204_143/0.07)]', className)}>{children}</div>;
 }
 
 /* ------------------------------- monster pane ------------------------------- */
@@ -544,7 +551,7 @@ function MonsterCard({ monster: m, ringZoom, phys }: { monster: Monster | null; 
         </div>
       </div>
 
-      <div className="self-center" style={{ zoom: ringZoom }}><HpRing m={m} state={state} /></div>
+      <FitRing max={ringZoom}><HpRing m={m} state={state} /></FitRing>
 
       {state === 'capture' && <CaptureBanner />}
       {done && (
@@ -573,6 +580,27 @@ const RING_R = 130;
 const RING_C = 2 * Math.PI * RING_R;
 const ZONE_R = 149; // thin outer arc marking the capture zone
 const ZONE_C = 2 * Math.PI * ZONE_R;
+
+// The ring takes whatever height the card has left (up to `max` zoom), so the rows below it never get pushed out.
+const RING_PX = 304;
+function FitRing({ max, children }: { max: number; children: ReactNode }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [zoom, setZoom] = useState(max);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const fit = () => setZoom(Math.max(0.35, Math.min(max, el.clientHeight / RING_PX, el.clientWidth / RING_PX)));
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [max]);
+  return (
+    <div ref={box} className="flex min-h-0 flex-1 basis-0 items-center justify-center overflow-hidden">
+      <div style={{ zoom }}>{children}</div>
+    </div>
+  );
+}
 
 function HpRing({ m, state }: { m: Monster; state: ReturnType<typeof hpState> }) {
   const r = ratio(m.hp, m.hpMax);
@@ -1082,61 +1110,91 @@ const hms = (sec: number) => (sec >= 3600 ? `${Math.floor(sec / 3600)}:${mmss(se
 function HunterView({ profile, layout }: { profile: Profile | null; layout: Layout }) {
   const st = historyStats(useHistory());
   const portrait = layout === 'portrait';
+  const has = st.hunts > 0;
+  const stats: [string, string][] = [
+    [t.hunter.hunts, has ? String(st.hunts) : '—'], [t.hunter.totalTime, has ? hms(st.totalSec) : '—'],
+    [t.hunter.totalDamage, has ? fmtInt(st.selfDamage) : '—'], [t.hunter.avgDps, has ? st.avgDps.toFixed(1) : '—'],
+    [t.hunter.bestDps, has ? st.bestDps.toFixed(1) : '—'],
+  ];
+  const topCount = Math.max(1, ...st.monsters.map((m) => m.count));
   return (
-    <div className={cx('grid min-h-0 flex-1 gap-4', portrait
-      ? 'grid-rows-[auto_minmax(0,1fr)_minmax(0,1fr)]'
-      : 'grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)] grid-rows-[auto_minmax(0,1fr)]')}>
-      <Panel className="flex items-center gap-5 px-6 py-5">
-        <Tile icon="sword" size={64} className="border border-gold/40 bg-[#241C12] text-gold-hi" />
-        {profile ? (
-          <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-x-8 gap-y-1">
-            <span className="truncate font-display text-[28px] font-semibold">{profile.name || t.hunter.profile}</span>
-            {profile.hr != null && <span className="text-[15px] text-muted">{t.hunter.hr} <b className="font-deco text-[30px] text-gold-hi">{profile.hr}</b></span>}
-            {profile.weapon && <span className="text-[15px] text-muted">{t.hunter.weapon} <b className="text-lg text-ink">{profile.weapon.name || profile.weapon.type}</b></span>}
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
+      {/* who + totals: one wide card */}
+      <Panel className="flex shrink-0 flex-wrap items-center gap-x-8 gap-y-5 px-7 py-6">
+        <div className="flex min-w-0 flex-1 basis-72 items-center gap-5">
+          <div className="flex size-18 shrink-0 items-center justify-center rounded-full border-2 border-gold bg-avatar text-gold shadow-[0_0_18px_rgb(200_169_106/0.25)]">
+            <Icon name="shield" size={34} />
           </div>
-        ) : <span className="text-[17px] text-ink-2">{t.hunter.noProfile}</span>}
+          {profile ? (
+            <div className="flex min-w-0 flex-col gap-1">
+              <span className="truncate font-display text-[30px] leading-tight font-bold">{profile.name || t.hunter.profile}</span>
+              {profile.weapon && <span className="truncate text-[15px] text-ink-2">{profile.weapon.name || profile.weapon.type}</span>}
+            </div>
+          ) : <span className="text-[17px] text-ink-2">{t.hunter.noProfile}</span>}
+          {profile?.hr != null && (
+            <div className="ml-auto flex shrink-0 flex-col items-center rounded-xl border border-gold/40 bg-[#241C12] px-5 py-2">
+              <span className="text-[11px] tracking-[3px] text-gold">{t.hunter.hr}</span>
+              <span className="font-deco text-[40px] leading-none font-semibold text-gold-hi">{profile.hr}</span>
+            </div>
+          )}
+        </div>
+        {/* sized by content (numbers never cut); wraps under the name when there's no room */}
+        <dl className={cx('flex divide-x divide-line', portrait && 'basis-full justify-between')}>
+          {stats.map(([k, v]) => (
+            <div key={k} className="flex flex-col gap-1 px-5 first:pl-0 last:pr-0">
+              <dt className="text-[13px] whitespace-nowrap text-muted">{k}</dt>
+              <dd className={cx('text-2xl leading-tight font-bold whitespace-nowrap', !has && 'text-disabled')}>{v}</dd>
+            </div>
+          ))}
+        </dl>
       </Panel>
-      <Panel className={cx('flex min-h-0 flex-col gap-4 px-6 py-5', !portrait && 'row-span-2')}>
-        <Eyebrow icon="star" right={profile && <span className="text-sm text-muted">{profile.skills.length}</span>}>{t.hunter.skills}</Eyebrow>
-        {!profile?.skills.length ? <span className="text-ink-2">{profile ? t.hunter.noSkills : t.hunter.noProfile}</span> : (
-          <ul className="grid min-h-0 grid-cols-[repeat(auto-fill,minmax(260px,1fr))] content-start gap-x-6 gap-y-2.5 overflow-y-auto pr-1">
-            {profile.skills.map((k) => (
-              <li key={k.id} className="flex items-center justify-between gap-3 rounded-lg bg-surface-2 px-3 py-2">
-                <span className="truncate text-[15px]">{k.name}</span>
-                <span className="flex shrink-0 items-center gap-1" aria-label={`Lv ${k.lv}${k.max ? ` / ${k.max}` : ''}`}>
-                  {Array.from({ length: Math.max(k.lv, k.max || 0) }, (_, i) => (
-                    <span key={i} className={cx('h-3.5 w-2 rounded-sm', i < k.lv ? 'bg-gold-hi' : 'bg-track')} />
-                  ))}
-                  <b className="ml-1.5 w-6 text-right text-sm">{k.lv}</b>
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Panel>
-      <Panel className={cx('flex min-h-0 flex-col gap-4 px-6 py-5', !portrait && 'col-start-1 row-start-2')}>
-        <Eyebrow icon="target">{t.hunter.stats}</Eyebrow>
-        {st.hunts === 0 ? <span className="text-ink-2">{t.hunter.noHistory}</span> : <>
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
-            {([[t.hunter.hunts, String(st.hunts)], [t.hunter.totalTime, hms(st.totalSec)], [t.hunter.totalDamage, fmtInt(st.selfDamage)],
-              [t.hunter.avgDps, st.avgDps.toFixed(1)], [t.hunter.bestDps, st.bestDps.toFixed(1)]] as const).map(([k, v]) => (
-              <div key={k} className="flex flex-col rounded-xl border border-line bg-surface-2 px-4 py-2.5">
-                <span className="text-[13px] text-muted">{k}</span><b className="text-2xl">{v}</b>
+
+      <div className={cx('grid min-h-0 flex-1 gap-4', portrait ? 'grid-rows-2' : 'grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]')}>
+        <Panel className="flex min-h-0 flex-col gap-4 px-6 py-5">
+          <Eyebrow icon="star" right={profile && profile.skills.length > 0 && <span className="text-sm text-muted">{profile.skills.length}</span>}>{t.hunter.skills}</Eyebrow>
+          {!profile?.skills.length ? <span className="text-ink-2">{profile ? t.hunter.noSkills : t.hunter.noProfile}</span> : (
+            <ul className="grid min-h-0 grid-cols-[repeat(auto-fill,minmax(250px,1fr))] content-start gap-2 overflow-y-auto pr-1">
+              {profile.skills.map((k) => {
+                const maxed = !!k.max && k.lv >= k.max;
+                return (
+                  <li key={k.id} className={cx('flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5',
+                    maxed ? 'border-gold/30 bg-[#211A10]' : 'border-transparent bg-surface-2')}>
+                    <span className={cx('truncate text-[15px]', maxed && 'text-gold-hi')}>{k.name}</span>
+                    <span className="flex shrink-0 items-center gap-0.75" aria-label={`Lv ${k.lv}${k.max ? ` / ${k.max}` : ''}`}>
+                      {Array.from({ length: Math.max(k.lv, k.max || 0) }, (_, i) => (
+                        <span key={i} className={cx('h-3 w-1.5 -skew-x-12 rounded-[1px]', i < k.lv ? 'bg-gold-hi' : 'bg-track')} />
+                      ))}
+                      <b className="ml-2 w-5 text-right text-sm">{k.lv}</b>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Panel>
+
+        <Panel className="flex min-h-0 flex-col gap-4 px-6 py-5">
+          <Eyebrow icon="target" right={has && <span className="text-xs text-muted">{t.hunter.statsNote(st.hunts)}</span>}>{t.hunter.monstersTitle}</Eyebrow>
+          {st.monsters.length === 0 ? <span className="text-ink-2">{t.hunter.noHistory}</span> : (
+            <div className="flex min-h-0 flex-col gap-1.5 overflow-y-auto pr-1">
+              <div className="grid grid-cols-[minmax(0,1fr)_3.5rem_3.5rem_4rem] gap-3 px-3 text-xs text-muted">
+                <span>{t.hunter.monster}</span><span className="text-right">{t.hunter.count}</span>
+                <span className="text-right">{t.hunter.slain}</span><span className="text-right">{t.hunter.best}</span>
               </div>
-            ))}
-          </div>
-          {st.monsters.length > 0 && <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_repeat(3,auto)] content-start gap-x-6 gap-y-2 overflow-y-auto pr-1 text-[15px]">
-            {[t.hunter.monster, t.hunter.count, t.hunter.slain, t.hunter.best].map((h) => <span key={h} className="text-[13px] text-muted">{h}</span>)}
-            {st.monsters.map((m) => [
-              <span key={`n${m.name}`} className="truncate font-display font-semibold">{m.name}</span>,
-              <span key={`c${m.name}`} className="text-right">{m.count}</span>,
-              <span key={`s${m.name}`} className="text-right">{m.slain}</span>,
-              <span key={`b${m.name}`} className="text-right">{m.bestSec != null ? mmss(m.bestSec) : '—'}</span>,
-            ])}
-          </div>}
-          <span className="text-xs text-muted">{t.hunter.statsNote(st.hunts)}</span>
-        </>}
-      </Panel>
+              {st.monsters.map((m) => (
+                <div key={m.name} className="relative grid grid-cols-[minmax(0,1fr)_3.5rem_3.5rem_4rem] items-center gap-3 overflow-hidden rounded-lg bg-surface-2 px-3 py-2.5 text-[15px]">
+                  {/* faint bar behind the row: how often, relative to the most hunted */}
+                  <span className="absolute inset-y-0 left-0 bg-gold/8" style={{ width: `${(m.count / topCount) * 100}%` }} />
+                  <span className="relative truncate font-display font-semibold">{m.name}</span>
+                  <span className="relative text-right font-semibold">{m.count}</span>
+                  <span className="relative text-right text-ink-2">{m.slain}</span>
+                  <span className="relative text-right text-ink-2">{m.bestSec != null ? mmss(m.bestSec) : '—'}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+      </div>
     </div>
   );
 }
@@ -1144,103 +1202,200 @@ function HunterView({ profile, layout }: { profile: Profile | null; layout: Layo
 /* --------------------------------- settings --------------------------------- */
 
 const PANEL_KEYS: PanelKey[] = ['now', 'parts', 'ailments', 'buffs', 'damage'];
+type Section = 'general' | 'discord' | 'setup' | 'about';
+const REPO_URL = 'https://github.com/PJsongsana/MHWilds-Next';
 
-// Opened with the gear button or S; every control is a native input, so it works with the keyboard.
+// On/off switch: a real checkbox (keyboard + screen readers) drawn as a track with a knob.
+function Switch({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
+  return (
+    <input type="checkbox" role="switch" aria-label={label} checked={checked} onChange={(e) => onChange(e.target.checked)}
+      className={cx('relative h-6 w-11 shrink-0 cursor-pointer appearance-none rounded-full border transition-colors',
+        'after:absolute after:top-0.5 after:left-0.5 after:size-[18px] after:rounded-full after:bg-ink after:transition-transform',
+        'checked:border-gold checked:bg-gold/70 checked:after:translate-x-5 checked:after:bg-on-accent',
+        'border-line bg-track focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold')} />
+  );
+}
+
+// One setting: label (+ hint) on the left, its control on the right.
+function Row({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-6 py-3">
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span>{label}</span>
+        {hint && <span className="text-xs text-muted">{hint}</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Group({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="flex flex-col">
+      <h3 className="mb-1 text-xs font-semibold tracking-[1.5px] text-gold uppercase">{title}</h3>
+      <div className="flex flex-col divide-y divide-line/70">{children}</div>
+    </section>
+  );
+}
+
+const inputCls = 'rounded-lg border border-line bg-surface-2 px-3 py-1.5 focus-visible:border-gold focus-visible:outline-none';
+
+// Opened with the gear button or S (Esc closes). Sections on the left; every control is a native input.
 function SettingsDialog({ onClose, setup, discord }: { onClose: () => void; setup: Setup; discord: DiscordStatus }) {
   const s = useSettings();
-  const first = useRef<HTMLInputElement>(null);
-  useEffect(() => { first.current?.focus(); }, []);
+  const app = !!window.huntApp; // Discord + install status only exist in the desktop app
+  const sections: Section[] = ['general', ...(app ? (['discord', 'setup'] as const) : []), 'about'];
+  const [sec, setSec] = useState<Section>('general');
+  const panel = useRef<HTMLDivElement>(null);
+  useEffect(() => { panel.current?.focus(); }, []);
+  const setDiscord = (patch: Partial<typeof s.discord>) => setSettings({ discord: { ...s.discord, ...patch } });
+
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" onClick={onClose}>
-      <div role="dialog" aria-modal="true" aria-label={t.settings.title} onClick={(e) => e.stopPropagation()}
-        className="wilds-panel flex max-h-[92vh] w-full max-w-md flex-col gap-5 overflow-y-auto p-6 text-[15px]">
-        <Eyebrow icon="gear">{t.settings.title}</Eyebrow>
-        <label className="flex items-center justify-between gap-4">
-          <span>{t.settings.port}</span>
-          <input ref={first} type="number" min={1024} max={65535} value={s.port}
-            onChange={(e) => { const p = Number(e.target.value); if (p >= 1024 && p <= 65535) setSettings({ port: p }); }}
-            className="w-28 rounded-lg border border-line bg-surface-2 px-3 py-1.5 text-right" />
-        </label>
-        <label className="flex flex-col gap-2">
-          <span className="flex justify-between"><span>{t.settings.scale}</span><b>{Math.round(s.scale * 100)}%</b></span>
-          <input type="range" min={0.7} max={1.5} step={0.05} value={s.scale} onChange={(e) => setSettings({ scale: Number(e.target.value) })}
-            className="accent-gold" />
-        </label>
-        <label className="flex items-center justify-between gap-4">
-          <span>{t.settings.sound}</span>
-          <input type="checkbox" checked={s.sound} className="size-5 accent-gold"
-            onChange={(e) => { setSettings({ sound: e.target.checked }); if (e.target.checked) beep(TONES.capture!); }} />
-        </label>
-        {window.huntApp && (
-          <fieldset className="flex flex-col gap-2">
-            <legend className="mb-1 text-muted">Discord</legend>
-            <label className="flex items-center justify-between gap-4">
-              <span>{t.settings.discord}</span>
-              <input type="checkbox" checked={s.discord.enabled} className="size-5 accent-gold"
-                onChange={(e) => setSettings({ discord: { ...s.discord, enabled: e.target.checked } })} />
-            </label>
-            <label className="flex items-center justify-between gap-4">
-              <span>{t.settings.discordId}</span>
-              <input type="text" inputMode="numeric" value={s.discord.clientId} placeholder="1234567890123456789"
-                onChange={(e) => setSettings({ discord: { ...s.discord, clientId: e.target.value.replace(/\D/g, '') } })}
-                className="w-52 rounded-lg border border-line bg-surface-2 px-3 py-1.5 text-right" />
-            </label>
-            <div className="flex flex-col gap-0.5 rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm">
-              <span className="flex items-center gap-2 text-muted">
-                <span className={cx('size-2 rounded-full', DISCORD_DOT[discord.state])} />{t.settings.discordStatus[discord.state]}
-              </span>
-              {discord.state === 'live' && <>
-                <b className="font-semibold">{discord.details ?? '—'}</b>
-                <span className="text-ink-2">{discord.line2 ?? t.settings.discordNothing}</span>
-              </>}
-            </div>
-            <p className="text-xs text-muted">{t.settings.discordHint}</p>
-            <details className="flex flex-col gap-2">
-              <summary className="cursor-pointer text-sm text-ink-2 hover:text-ink">{t.settings.discordText}</summary>
-              <p className="mt-2 text-xs text-muted">{t.settings.discordTextHint}</p>
-              <div className="mt-2 flex flex-col gap-2">
-                {Object.entries(DISCORD_TEXT).map(([k, def]) => (
-                  <label key={k} className="flex items-center justify-between gap-3 text-sm">
-                    <span className="shrink-0 text-ink-2">{t.settings.discordTextKey[k] ?? k}</span>
-                    <input id={`discord-text-${k}`} type="text" value={s.discord.text[k] ?? ''} placeholder={def} maxLength={100}
-                      onChange={(e) => setSettings({ discord: { ...s.discord, text: { ...s.discord.text, [k]: e.target.value } } })}
-                      className="w-60 min-w-0 rounded-lg border border-line bg-surface-2 px-3 py-1.5" />
-                  </label>
-                ))}
-                <button type="button" onClick={() => setSettings({ discord: { ...s.discord, text: {} } })}
-                  className="self-start text-xs text-muted underline hover:text-ink">{t.settings.discordTextReset}</button>
-              </div>
-            </details>
-          </fieldset>
-        )}
-        {setup.status && (
-          <fieldset className="flex flex-col gap-2">
-            <legend className="mb-1 text-muted">{t.setup.title}</legend>
-            <SetupList status={setup.status} />
-            <button type="button" onClick={setup.check} className="self-start text-sm text-muted underline hover:text-ink">{t.setup.recheck}</button>
-          </fieldset>
-        )}
-        <fieldset className="flex flex-col gap-2">
-          <legend className="mb-1 text-muted">{t.settings.panels}</legend>
-          {PANEL_KEYS.map((k) => (
-            <label key={k} className="flex items-center justify-between gap-4">
-              <span>{t.settings.panel[k]}</span>
-              <input type="checkbox" checked={s.panels[k]} className="size-5 accent-gold"
-                onChange={(e) => setSettings({ panels: { ...s.panels, [k]: e.target.checked } })} />
-            </label>
-          ))}
-        </fieldset>
-        <div className="flex items-center justify-between gap-3">
-          <button type="button" onClick={() => setSettings({ ...DEFAULT_SETTINGS })} className="text-sm text-muted underline hover:text-ink">{t.settings.reset}</button>
-          <button type="button" onClick={onClose}
-            className="rounded-lg border border-gold bg-gold/15 px-5 py-2 font-semibold text-gold-hi hover:bg-gold/25 focus-visible:outline-2 focus-visible:outline-gold">
-            {t.settings.close}
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/65 p-4 backdrop-blur-[2px]" onClick={onClose}>
+      <div ref={panel} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t.settings.title} onClick={(e) => e.stopPropagation()}
+        className="wilds-panel flex h-[min(680px,92vh)] w-full max-w-3xl flex-col overflow-hidden text-[15px] outline-none">
+        <div className="flex shrink-0 items-center justify-between gap-4 border-b border-line px-6 py-4">
+          <Eyebrow icon="gear">{t.settings.title}</Eyebrow>
+          <button type="button" onClick={onClose} aria-label={t.settings.close} title={t.settings.close}
+            className="flex size-9 items-center justify-center rounded-lg text-muted hover:bg-surface-2 hover:text-ink focus-visible:outline-2 focus-visible:outline-gold">
+            <span aria-hidden className="text-xl leading-none">×</span>
           </button>
         </div>
-        <p className="text-xs text-muted">{t.settings.hint}</p>
+
+        <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
+          <nav aria-label={t.settings.title} className="flex shrink-0 gap-1 overflow-x-auto border-b border-line p-3 sm:w-44 sm:flex-col sm:border-r sm:border-b-0">
+            {sections.map((k) => (
+              <button key={k} type="button" onClick={() => setSec(k)} aria-current={sec === k}
+                className={cx('flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-left whitespace-nowrap focus-visible:outline-2 focus-visible:outline-gold',
+                  sec === k ? 'bg-[#2A2014] text-gold-hi shadow-[inset_0_0_0_1px_rgb(200_169_106/0.3)]' : 'text-ink-2 hover:bg-surface-2 hover:text-ink')}>
+                {t.settings.sections[k]}
+                {k === 'discord' && <span className={cx('size-2 rounded-full', DISCORD_DOT[discord.state])} />}
+                {k === 'setup' && setup.status && setupProblem(setup.status) && <span className="size-2 rounded-full bg-accent" />}
+              </button>
+            ))}
+          </nav>
+
+          <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+            {sec === 'general' && (
+              <div className="flex flex-col gap-6">
+                <Group title={t.settings.display}>
+                  <Row label={t.settings.scale} hint={`${Math.round(s.scale * 100)}%`}>
+                    <input type="range" min={0.7} max={1.5} step={0.05} value={s.scale} aria-label={t.settings.scale}
+                      onChange={(e) => setSettings({ scale: Number(e.target.value) })} className="w-48 accent-gold" />
+                  </Row>
+                  <Row label={t.settings.sound}>
+                    <Switch label={t.settings.sound} checked={s.sound} onChange={(v) => { setSettings({ sound: v }); if (v) beep(TONES.capture!); }} />
+                  </Row>
+                </Group>
+                <Group title={t.settings.panels}>
+                  {PANEL_KEYS.map((k) => (
+                    <Row key={k} label={t.settings.panel[k]}>
+                      <Switch label={t.settings.panel[k]} checked={s.panels[k]} onChange={(v) => setSettings({ panels: { ...s.panels, [k]: v } })} />
+                    </Row>
+                  ))}
+                </Group>
+                <Group title={t.settings.advanced}>
+                  <Row label={t.settings.port}>
+                    <input type="number" min={1024} max={65535} value={s.port} aria-label={t.settings.port}
+                      onChange={(e) => { const p = Number(e.target.value); if (p >= 1024 && p <= 65535) setSettings({ port: p }); }}
+                      className={cx(inputCls, 'w-28 text-right')} />
+                  </Row>
+                </Group>
+              </div>
+            )}
+
+            {sec === 'discord' && (
+              <div className="flex flex-col gap-6">
+                {/* what friends see right now */}
+                <div className="flex flex-col gap-1 rounded-xl border border-line bg-surface-2 px-4 py-3">
+                  <span className="flex items-center gap-2 text-sm text-muted">
+                    <span className={cx('size-2 rounded-full', DISCORD_DOT[discord.state])} />{t.settings.discordStatus[discord.state]}
+                  </span>
+                  {discord.state === 'live' && <>
+                    <b className="font-semibold">{discord.details ?? '—'}</b>
+                    <span className="text-ink-2">{discord.line2 ?? t.settings.discordNothing}</span>
+                  </>}
+                </div>
+                <Group title={t.settings.connection}>
+                  <Row label={t.settings.discord}>
+                    <Switch label={t.settings.discord} checked={s.discord.enabled} onChange={(v) => setDiscord({ enabled: v })} />
+                  </Row>
+                  <Row label={t.settings.discordId} hint={t.settings.discordHint}>
+                    <input type="text" inputMode="numeric" value={s.discord.clientId} placeholder="1234567890123456789" aria-label={t.settings.discordId}
+                      onChange={(e) => setDiscord({ clientId: e.target.value.replace(/\D/g, '') })}
+                      className={cx(inputCls, 'w-56 text-right tabular-nums')} />
+                  </Row>
+                </Group>
+                <Group title={t.settings.discordText}>
+                  <p className="py-2 text-xs text-muted">{t.settings.discordTextHint}</p>
+                  {Object.entries(DISCORD_TEXT).map(([k, def]) => (
+                    <Row key={k} label={t.settings.discordTextKey[k] ?? k}>
+                      <input id={`discord-text-${k}`} type="text" value={s.discord.text[k] ?? ''} placeholder={def} maxLength={100}
+                        aria-label={t.settings.discordTextKey[k] ?? k}
+                        onChange={(e) => setDiscord({ text: { ...s.discord.text, [k]: e.target.value } })}
+                        className={cx(inputCls, 'w-72 min-w-0')} />
+                    </Row>
+                  ))}
+                  <div className="py-3">
+                    <button type="button" onClick={() => setDiscord({ text: {} })} className="text-sm text-muted underline hover:text-ink">{t.settings.discordTextReset}</button>
+                  </div>
+                </Group>
+              </div>
+            )}
+
+            {sec === 'setup' && (
+              <div className="flex flex-col gap-4">
+                {setup.status ? <SetupList status={setup.status} /> : <span className="text-muted">…</span>}
+                <p className="text-xs text-muted">{t.setup.needs}</p>
+                <button type="button" onClick={setup.check}
+                  className="self-start rounded-lg border border-line px-4 py-2 text-sm hover:border-gold focus-visible:outline-2 focus-visible:outline-gold">{t.setup.recheck}</button>
+              </div>
+            )}
+
+            {sec === 'about' && (
+              <div className="flex flex-col gap-5">
+                <div className="flex items-center gap-4">
+                  <div className="flex size-12 items-center justify-center rounded-xl bg-linear-to-br from-gold-hi to-gold text-on-accent">
+                    <Icon name="claw" size={26} stroke={2.2} />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="font-display text-lg font-semibold">Hunt Dashboard</span>
+                    <span className="text-sm text-muted">{t.settings.version} {APP_VERSION}</span>
+                  </div>
+                  <a href={REPO_URL} target="_blank" rel="noreferrer" className="ml-auto text-sm text-gold-hi underline">{t.settings.source}</a>
+                </div>
+                <Changelog text={CHANGELOG} />
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-line px-6 py-3">
+          <span className="text-xs text-muted">{t.settings.hint}</span>
+          <button type="button" onClick={() => setSettings({ ...DEFAULT_SETTINGS })} className="text-sm whitespace-nowrap text-muted underline hover:text-ink">{t.settings.reset}</button>
+        </div>
       </div>
     </div>
   );
+}
+
+// CHANGELOG.md, drawn without a markdown library: "## version", "### group", "- item", **bold**.
+function Changelog({ text }: { text: string }) {
+  const bold = (s: string) => s.split('**').map((part, i) => (i % 2 ? <b key={i} className="text-ink">{part}</b> : part));
+  const out: ReactNode[] = [];
+  let items: string[] = [];
+  const flush = () => {
+    if (items.length) out.push(<ul key={out.length} className="mb-3 flex list-disc flex-col gap-1 pl-5 text-sm text-ink-2 marker:text-gold/60">{items.map((x, i) => <li key={i}>{bold(x)}</li>)}</ul>);
+    items = [];
+  };
+  for (const line of text.split(/\r?\n/)) {
+    if (line.startsWith('- ')) { items.push(line.slice(2)); continue; }
+    flush();
+    if (line.startsWith('## ')) out.push(<h3 key={out.length} className="mt-2 border-b border-line pb-1 font-display text-lg font-semibold text-gold-hi">{line.slice(3)}</h3>);
+    else if (line.startsWith('### ')) out.push(<h4 key={out.length} className="mt-1 text-xs font-semibold tracking-[1.5px] text-muted uppercase">{line.slice(4)}</h4>);
+  }
+  flush();
+  return <div className="flex flex-col gap-2">{out}</div>;
 }
 
 /* ------------------------------- dev: mock bar ------------------------------ */

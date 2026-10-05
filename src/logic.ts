@@ -18,7 +18,7 @@ export interface Monster {
   parts: Part[]; ailments: Ailment[]; hitzones: Hitzone[]; scars: Scar[];
 }
 export interface Buff { id: string; name: string; remainSec: number | null; kind?: 'mantle' | 'song'; cooldown?: boolean }
-export interface Member { name: string; self?: boolean; palico?: boolean; owner?: string; damage: number; hits?: number; crits?: number; weakHits?: number }
+export interface Member { id?: string; name: string; self?: boolean; npc?: boolean; palico?: boolean; owner?: string; damage: number; hits?: number; crits?: number; weakHits?: number }
 export interface Vitals { hp?: number; hpMax?: number; hpRed?: number; stamina?: number; staminaMax?: number }
 /** The นักล่า tab: read by the Lua every ~2s. Gear/stats/save fields come later (phase 2, after the probe). */
 export interface Skill { id: string; name: string; lv: number; max?: number | null }
@@ -111,7 +111,23 @@ export function partyViews(party: Member[], elapsedSec: number) {
 
 /* ------------------------------ DPS over time ------------------------------ */
 
-export interface DamageSample { t: number; team: number; self: number } // t = quest elapsed sec, cumulative damage
+// t = quest elapsed sec; cumulative damage for the team, us, and (newer recordings) each member by memberKey
+export interface DamageSample { t: number; team: number; self: number; by?: Record<string, number> }
+
+/** Stable key for a party row: the game id when the reader sends one, else palico flag + name. */
+export const memberKey = (m: Member) => m.id ?? `${m.palico ? 'p:' : ''}${m.name}`;
+
+/** Rolling DPS of any one series over the last `window` seconds, one point per sample. */
+export function rollingDps(samples: DamageSample[], get: (s: DamageSample) => number, window = 15) {
+  const out: { t: number; v: number }[] = [];
+  let j = 0;
+  for (let i = 0; i < samples.length; i++) {
+    while (samples[i].t - samples[j].t > window) j++;
+    const dt = samples[i].t - samples[j].t;
+    out.push({ t: samples[i].t, v: dt > 0 ? Math.max(0, (get(samples[i]) - get(samples[j])) / dt) : 0 });
+  }
+  return out;
+}
 
 /** Rolling DPS (team and self) over the last `window` seconds, one point per sample. */
 export function dpsSeries(samples: DamageSample[], window = 15) {

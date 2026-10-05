@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { addHunt } from './history';
-import { addUptime, compactRecord, keepMonsters, linkState, normalize, type DamageSample, type HuntRecord, type Link, type Snapshot } from './logic';
+import { addUptime, compactRecord, keepMonsters, memberKey, linkState, normalize, type DamageSample, type HuntRecord, type Link, type Snapshot } from './logic';
 import { mocks } from './mocks';
 import { useSettings } from './settings';
 
@@ -21,6 +21,7 @@ export interface HuntState {
 const partyTotals = (s: Snapshot) => ({
   team: s.party.reduce((n, m) => n + m.damage, 0),
   self: s.party.find((m) => m.self)?.damage ?? 0,
+  by: Object.fromEntries(s.party.map((m) => [memberKey(m), m.damage])), // per-member lines in the summary chart
 });
 
 /** Live snapshot from the bridge (reconnects every 2s), or a mock with ?mock=<name>. */
@@ -110,7 +111,7 @@ function mockSamples(s: Snapshot): DamageSample[] {
   const out: DamageSample[] = [];
   for (let t = 0; t <= end; t += 5) {
     const k = Math.min(1, Math.max(0, (t / end) ** 1.1 + Math.sin(t / 40) * 0.02));
-    out.push({ t, team: team * k, self: self * k });
+    out.push({ t, team: team * k, self: self * k, by: Object.fromEntries(s.party.map((m, i) => [memberKey(m), m.damage * Math.min(1, k * (0.85 + 0.1 * i))])) });
   }
   return out;
 }

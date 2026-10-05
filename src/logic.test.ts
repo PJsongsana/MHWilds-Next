@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import {
   buffViews, callouts, elementRank, hpState, linkState, mmss, normalize, partViews, partyViews, pct, physTypeFor, pickMonster,
-  weakSpots, dpsSeries, questSummary, addUptime, uptimeViews, compactRecord, historyStats, keepMonsters, type Hitzone, type Monster,
+  weakSpots, dpsSeries, questSummary, addUptime, uptimeViews, compactRecord, historyStats, keepMonsters, memberKey, rollingDps, type Hitzone, type Monster,
 } from './logic';
 
 const hz = (name: string, slash: number, blow: number, shot: number, fire = 0, ice = 0): Hitzone =>
@@ -181,4 +181,13 @@ test('quest end: an empty monster list keeps the last one', () => {
   expect(keepMonsters(withMon, empty).monsters.map((m) => m.name)).toEqual(['x']);
   expect(keepMonsters(null, empty).monsters).toEqual([]);
   expect(keepMonsters(empty, withMon)).toBe(withMon);
+});
+
+test('per-member DPS: same-name players stay apart, rolling window per series', () => {
+  expect(memberKey({ id: 'a1', name: 'Hunter', damage: 0 })).toBe('a1');
+  expect(memberKey({ name: 'Hunter', damage: 0 })).not.toBe(memberKey({ name: 'Hunter', palico: true, damage: 0 }));
+  const samples = [0, 5, 10, 20].map((t) => ({ t, team: t * 30, self: t * 10, by: { a: t * 10, b: t * 20 } }));
+  const b = rollingDps(samples, (s) => s.by?.b ?? 0, 10);
+  expect(b.map((p) => p.v)).toEqual([0, 20, 20, 20]);
+  expect(rollingDps(samples, (s) => s.by?.missing ?? 0).every((p) => p.v === 0)).toBe(true); // old recording / unknown key
 });

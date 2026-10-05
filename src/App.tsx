@@ -2,15 +2,15 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import { Icon, iconFor, type IconName } from './icons';
 import {
   buffViews, callouts, dpsSeries, historyStats, elementRank, fmtInt, hpState, mmss, partViews, partyViews, pct, physTypeFor, physValue,
-  pickMonster, questSummary, ratio, uptimeViews, weakSpots, WEAK_HITZONE,
+  pickMonster, questSummary, ratio, uptimeViews, weakSpots, WEAK_HITZONE, memberKey, rollingDps,
   type Ailment, type Callout, type DamageSample, type Hitzone, type Link, type Monster, type PartView, type PhysType, type Scar,
-  type HuntRecord, type Profile, type Snapshot, type Vitals,
+  type HuntRecord, type Member, type Profile, type Snapshot, type Vitals,
 } from './logic';
 import { mocks } from './mocks';
 import DISCORD_TEXT from '../electron/presence-text.json'; // the default wording, shared with the desktop app
 import CHANGELOG from '../CHANGELOG.md?raw';
 import { version as APP_VERSION } from '../package.json';
-import { useHistory } from './history';
+import { HISTORY_MAX, useHistory } from './history';
 import { DEFAULT_SETTINGS, setSettings, useSettings, type PanelKey, type Tab } from './settings';
 import { t } from './strings';
 import { mockName, useHunt } from './useHunt';
@@ -38,7 +38,17 @@ const AIL_COLORS: Record<string, [string, string]> = {
 };
 const ailColors = (id: string) => AIL_COLORS[id] ?? ['#B8C0CA', '#262B33'];
 const ELEMENT_COLORS: Record<string, string> = { fire: '#F0835F', water: '#5AA9E6', thunder: '#E6C84A', ice: '#9FD8F0', dragon: '#B48BE8' };
-const PARTY_COLORS = ['#5AA9E6', '#8FD3A8', '#B48BE8'];
+// Us = orange; everyone else gets their own color, in table order (same mapping in the table and the chart)
+const SELF_COLOR = '#F2A541';
+const PARTY_COLORS = ['#5AA9E6', '#8FD3A8', '#B48BE8', '#E6C84A', '#F07F9C', '#6FD6D6', '#C9A27A', '#9AA5B1'];
+// Top damage dealer gets a crown (ties: the first one listed)
+const topDamageKey = (members: Member[]) =>
+  members.reduce<Member | null>((best, m) => (m.damage > 0 && (!best || m.damage > best.damage) ? m : best), null);
+const Crown = () => <span title={t.topDamage} aria-label={t.topDamage} className="shrink-0 text-crown"><Icon name="crown" size={15} /></span>;
+const partyColors = (members: Member[]) => {
+  let other = 0;
+  return new Map(members.map((m) => [memberKey(m), m.self ? SELF_COLOR : PARTY_COLORS[other++ % PARTY_COLORS.length]]));
+};
 
 const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ');
 
@@ -97,7 +107,7 @@ export default function App() {
       if (e.key === 'Escape') setShowSettings(false);
       if (e.target instanceof HTMLInputElement) return;
       if (e.key.toLowerCase() === 's') setShowSettings((v) => !v);
-      else if (e.key === '1' || e.key === '2') setSettings({ tab: e.key === '1' ? 'hunt' : 'hunter' });
+      else if (e.key === '1' || e.key === '2' || e.key === '3') setSettings({ tab: (['hunt', 'hunter', 'history'] as const)[Number(e.key) - 1] });
     };
     addEventListener('keydown', onKey);
     return () => removeEventListener('keydown', onKey);
@@ -108,7 +118,9 @@ export default function App() {
       <div style={{ zoom, width: w, height: h }} className="flex flex-col gap-4 px-6 py-5 tabular-nums">
         <Header snap={snap} link={link} tab={settings.tab} discord={discord} onSettings={() => setShowSettings(true)} />
         <SetupNotice {...setup} />
-        {settings.tab === 'hunter' ? (
+        {settings.tab === 'history' ? (
+          <HistoryTab layout={layout} />
+        ) : settings.tab === 'hunter' ? (
           <HunterView profile={snap?.connected ? snap.profile ?? null : null} layout={layout} />
         ) : link === 'connecting' ? (
           <Center icon="clock" title={t.waitingBridge} sub={t.waitingBridgeHint} />
@@ -418,7 +430,7 @@ function Header({ snap, link, tab, discord, onSettings }: { snap: Snapshot | nul
         <div className="flex min-w-0 flex-col">
           <div className="font-deco text-[11px] tracking-[4px] text-gold">{t.brand}</div>
           <div className="truncate font-display text-xl font-semibold">
-            {tab === 'hunter' ? t.tabs.hunter : q?.active ? `${q.name || t.quest} · ${t.hunting(snap!.monsters.length)}` : t.notInQuest}
+            {tab !== 'hunt' ? t.tabs[tab] : q?.active ? `${q.name || t.quest} · ${t.hunting(snap!.monsters.length)}` : t.notInQuest}
           </div>
         </div>
       </div>
@@ -444,7 +456,7 @@ function Header({ snap, link, tab, discord, onSettings }: { snap: Snapshot | nul
         )}
         <DiscordChip st={discord} />
         <nav aria-label={t.tabs.key} title={t.tabs.key} className="flex h-12 items-center rounded-xl border border-line bg-surface/90 p-1">
-          {(['hunt', 'hunter'] as const).map((k, i) => (
+          {(['hunt', 'hunter', 'history'] as const).map((k, i) => (
             <button key={k} type="button" onClick={() => setSettings({ tab: k })} aria-current={tab === k}
               className={cx('flex h-full items-center gap-1.5 rounded-lg px-3.5 font-display text-[15px] font-semibold focus-visible:outline-2 focus-visible:outline-gold',
                 tab === k ? 'bg-[#2A2014] text-gold-hi shadow-[inset_0_0_0_1px_rgb(200_169_106/0.35)]' : 'text-muted hover:text-ink')}>
@@ -949,24 +961,27 @@ function VitalsBars({ v }: { v: Vitals }) {
 /* ------------------------------- damage meter ------------------------------- */
 
 function DamageMeter({ members, dps, samples }: ReturnType<typeof partyViews> & { samples?: DamageSample[] }) {
-  let other = 0;
+  const colors = partyColors(members);
+  const top = topDamageKey(members);
   return (
     // one row per hunter: name | bar | damage · % | crit  (fits both the bottom row and the right column)
     <Panel className="flex min-h-0 flex-1 flex-col gap-2 px-5 py-3.5">
       <Eyebrow icon="sword" right={<span className="shrink-0 text-[15px] text-ink-2">DPS <b className="text-ink">{dps.toFixed(1)}</b></span>}>{t.damageTitle}</Eyebrow>
       {members.length === 0 && <div className="text-[15px] text-muted">{t.noDamage}</div>}
-      <div className="relative flex min-h-0 flex-1 flex-col justify-center gap-1.5 overflow-y-auto">
+      <div className="relative flex min-h-0 flex-1 flex-col justify-center-safe gap-1.5 overflow-y-auto">
         {/* DPS trend sits faintly behind the rows so it costs no height */}
         {samples && samples.length > 2 && (
           <div className="pointer-events-none absolute inset-0 opacity-35"><DpsChart samples={samples} height={0} fill /></div>
         )}
         {members.map((m, i) => {
-          const color = m.self ? '#F2A541' : PARTY_COLORS[other++ % PARTY_COLORS.length];
+          const color = colors.get(memberKey(m))!;
           return (
             <div key={`${m.name}-${i}`} className={cx('grid grid-cols-[minmax(0,100px)_minmax(0,1fr)_auto_auto] items-center gap-3', m.palico && 'pl-4 opacity-80')}>
               <div className="flex min-w-0 items-center gap-2">
                 <span className="size-2.5 shrink-0 rounded-full" style={{ background: color }} />
                 <span className={cx('truncate text-[15px] font-semibold', m.self && 'text-accent')}>{m.name}</span>
+                {m === top && members.length > 1 && <Crown />}
+                {m.npc && <span className="shrink-0 rounded border border-line px-1 text-[10px] leading-4 font-normal text-muted">NPC</span>}
               </div>
               <Bar value={m.pct / 100} color={color} h={8} />
               <span className="text-right text-sm text-muted">{fmtInt(m.damage)} · <b className="text-ink">{m.pct}%</b></span>
@@ -998,54 +1013,159 @@ function DpsChart({ samples, height, fill }: { samples: DamageSample[]; height: 
   );
 }
 
+// Summary chart: one DPS line per member (same colors as the table) over the team area; chips toggle each line.
+// Recordings made before per-member samples existed only have team + us.
+function PartyDpsChart({ samples, members, colors }: { samples: DamageSample[]; members: Member[]; colors: Map<string, string> }) {
+  const perMember = samples.some((s) => s.by);
+  const [hidden, setHidden] = useState<Set<string>>(new Set());
+  const [team, setTeam] = useState(!perMember); // with per-member lines the team total would squash them at the bottom
+  const toggle = (k: string) => setHidden((h) => { const n = new Set(h); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+  const series = perMember
+    ? members.filter((m) => !hidden.has(memberKey(m))).map((m) => ({ key: memberKey(m), color: colors.get(memberKey(m))!, self: !!m.self, pts: rollingDps(samples, (s) => s.by?.[memberKey(m)] ?? 0) }))
+    : [{ key: 'self', color: SELF_COLOR, self: true, pts: rollingDps(samples, (s) => s.self) }];
+  const teamPts = rollingDps(samples, (s) => s.team);
+  const W = 600, H = 150;
+  const tMax = samples.at(-1)?.t || 1;
+  const yMax = Math.max(1, ...(team ? teamPts : []).map((p) => p.v), ...series.flatMap((s) => s.pts.map((p) => p.v)));
+  const path = (pts: { t: number; v: number }[]) => pts.map((p, i) => `${i ? 'L' : 'M'}${((p.t / tMax) * W).toFixed(1)},${(H - (p.v / yMax) * (H - 4)).toFixed(1)}`).join(' ');
+  const chip = (on: boolean) => cx('flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs focus-visible:outline-2 focus-visible:outline-gold',
+    on ? 'border-line bg-surface-2 text-ink' : 'border-line/50 text-muted line-through opacity-60');
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="mr-1 text-[13px] text-muted">{t.chart.title}</span>
+        <button type="button" onClick={() => setTeam(!team)} aria-pressed={team} className={chip(team)}>
+          <span className="h-2.5 w-3.5 rounded-sm bg-[#5AA9E6]/40" />{t.chart.team}
+        </button>
+        {perMember && members.map((m) => {
+          const k = memberKey(m), on = !hidden.has(k);
+          return (
+            <button key={k} type="button" onClick={() => toggle(k)} aria-pressed={on} className={chip(on)}>
+              <span className="size-2.5 rounded-full" style={{ background: colors.get(k) }} />
+              <span className="max-w-28 truncate">{m.name}</span>
+            </button>
+          );
+        })}
+        {perMember && <>
+          <button type="button" onClick={() => { setHidden(new Set()); setTeam(true); }} className="ml-1 text-xs text-muted underline hover:text-ink">{t.chart.all}</button>
+          <button type="button" onClick={() => { setHidden(new Set(members.filter((m) => !m.self).map(memberKey))); setTeam(false); }}
+            className="text-xs text-muted underline hover:text-ink">{t.chart.onlyMe}</button>
+        </>}
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="h-[150px] w-full" aria-label={t.dpsChart}>
+        {[0.25, 0.5, 0.75].map((f) => <line key={f} x1="0" x2={W} y1={H * f} y2={H * f} stroke="#3A2E1F" strokeWidth="1" vectorEffect="non-scaling-stroke" />)}
+        {team && <path d={`${path(teamPts)} L${W},${H} L0,${H} Z`} fill="rgb(90 169 230 / 0.14)" />}
+        {series.map((s) => (
+          <path key={s.key} d={path(s.pts)} fill="none" stroke={s.color} strokeWidth={s.self ? 2.2 : 1.5} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
+        ))}
+      </svg>
+      {!perMember && <span className="text-xs text-muted">{t.chart.oldRecord}</span>}
+    </div>
+  );
+}
+
 /* ------------------------------ post-quest summary ------------------------------ */
 
-// Out of a quest: the latest hunt's summary, plus a strip of earlier hunts to flip through (click or ←/→).
+// Out of a quest: the latest hunt's summary, with a way into the full history tab.
 function HistoryView({ latest }: { latest: { snap: Snapshot; samples: DamageSample[]; uptime: HuntRecord['uptime'] } | null }) {
   const records = useHistory();
-  const [i, setI] = useState(0);
-  useEffect(() => { setI(0); }, [records.length]); // a new hunt was saved → show it
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowRight') setI((v) => Math.min(v + 1, records.length - 1));
-      else if (e.key === 'ArrowLeft') setI((v) => Math.max(v - 1, 0));
-    };
-    addEventListener('keydown', onKey);
-    return () => removeEventListener('keydown', onKey);
-  }, [records.length]);
-  const r = records[i];
+  const r = records[0];
   if (!r && !latest) return <Center icon="target" title={t.notInQuest} />;
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
       {r ? <SummaryView snap={r.snap} samples={r.samples} uptime={r.uptime} /> : <SummaryView snap={latest!.snap} samples={latest!.samples} uptime={latest!.uptime} />}
       {records.length > 1 && (
-        <nav aria-label={t.summary.history} className="flex shrink-0 gap-2 overflow-x-auto pb-1">
-          {records.map((h, k) => {
-            const self = h.snap.party.find((m) => m.self);
-            return (
-              <button key={h.id} type="button" onClick={() => setI(k)} aria-current={k === i}
-                className={cx('flex min-w-44 shrink-0 flex-col items-start gap-0.5 rounded-xl border px-3 py-2 text-left text-xs',
-                  k === i ? 'border-gold bg-[#241C12] text-ink' : 'border-line bg-surface/80 text-ink-2 hover:border-gold/60')}>
-                <span className="text-muted">{new Date(h.endedAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
-                <span className="max-w-40 truncate font-display text-sm font-semibold">{h.snap.monsters.map((m) => m.name).join(', ') || t.quest}</span>
-                <span>{mmss(h.snap.quest?.elapsedSec ?? 0)} · {fmtInt(self?.damage ?? 0)}</span>
-              </button>
-            );
-          })}
-        </nav>
+        <button type="button" onClick={() => setSettings({ tab: 'history' })}
+          className="self-end rounded-lg border border-line px-4 py-2 text-sm text-ink-2 hover:border-gold hover:text-gold-hi focus-visible:outline-2 focus-visible:outline-gold">
+          {t.history.viewAll(records.length)} <kbd className="ml-1 font-sans text-[10px] text-muted">3</kbd>
+        </button>
       )}
     </div>
   );
 }
 
-function SummaryView({ snap, samples, uptime }: { snap: Snapshot; samples: DamageSample[]; uptime?: HuntRecord['uptime'] }) {
+// One line per saved hunt: how it ended, what, when, how long, our damage and place in the team.
+function huntLine(h: HuntRecord) {
+  const s = questSummary(h.snap);
+  const ranked = [...h.snap.party].sort((a, b) => b.damage - a.damage);
+  const selfIdx = ranked.findIndex((m) => m.self);
+  return {
+    won: s.monsters.length > 0 && s.monsters.every((m) => m.done),
+    names: s.monsters.map((m) => m.name).join(', ') || t.quest,
+    sec: h.snap.quest?.elapsedSec ?? 0,
+    damage: selfIdx >= 0 ? ranked[selfIdx].damage : 0,
+    rank: selfIdx >= 0 && ranked.length > 1 ? selfIdx + 1 : null,
+  };
+}
+
+// The history tab: saved hunts (newest first) on the left, the chosen one's full summary on the right. ↑/↓ moves.
+function HistoryTab({ layout }: { layout: Layout }) {
+  const records = useHistory();
+  const [i, setI] = useState(0);
+  const list = useRef<HTMLDivElement>(null);
+  useEffect(() => { setI(0); }, [records.length]); // a new hunt was saved → show it
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowRight') { e.preventDefault(); setI((v) => Math.min(v + 1, records.length - 1)); }
+      else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') { e.preventDefault(); setI((v) => Math.max(v - 1, 0)); }
+    };
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  }, [records.length]);
+  useEffect(() => { list.current?.querySelector('[aria-current="true"]')?.scrollIntoView({ block: 'nearest' }); }, [i]);
+  if (records.length === 0) return <Center icon="clock" title={t.history.empty} sub={t.history.emptyHint} />;
+  const r = records[Math.min(i, records.length - 1)];
+  const portrait = layout === 'portrait';
+  return (
+    <div className={cx('grid min-h-0 flex-1 gap-4', portrait ? 'grid-rows-[minmax(0,0.42fr)_minmax(0,1fr)]' : 'grid-cols-[360px_minmax(0,1fr)]')}>
+      <Panel className="flex min-h-0 flex-col gap-3 px-4 py-4">
+        <div className="px-1"><Eyebrow icon="clock" right={<span className="text-xs text-muted">{t.history.count(records.length, HISTORY_MAX)}</span>}>{t.history.title}</Eyebrow></div>
+        <div ref={list} role="list" className="flex min-h-0 flex-col gap-1.5 overflow-y-auto pr-1">
+          {records.map((h, k) => {
+            const v = huntLine(h);
+            const on = k === i;
+            return (
+              <button key={h.id} type="button" role="listitem" onClick={() => setI(k)} aria-current={on}
+                className={cx('grid shrink-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border px-3 py-2.5 text-left focus-visible:outline-2 focus-visible:outline-gold',
+                  on ? 'border-gold/70 bg-[#241C12]' : 'border-transparent bg-surface-2 hover:border-line')}>
+                <span title={v.won ? t.history.won : t.history.notWon}
+                  className={cx('flex size-8 items-center justify-center rounded-full', v.won ? 'bg-ok/15 text-ok' : 'bg-track text-muted')}>
+                  <Icon name={v.won ? 'check' : 'claw'} size={16} stroke={2.2} />
+                </span>
+                <span className="flex min-w-0 flex-col">
+                  <span className={cx('truncate font-display text-[15px] font-semibold', on && 'text-gold-hi')}>{v.names}</span>
+                  <span className="truncate text-xs text-muted">
+                    {new Date(h.endedAt).toLocaleString('th-TH', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })} · {mmss(v.sec)}
+                  </span>
+                </span>
+                <span className="flex flex-col items-end">
+                  <span className="text-sm font-semibold">{fmtInt(v.damage)}</span>
+                  {v.rank != null && (
+                    <span className={cx('flex items-center gap-1 text-xs', v.rank === 1 ? 'text-crown' : 'text-muted')}>
+                      {v.rank === 1 && <Icon name="crown" size={12} />}#{v.rank}
+                    </span>
+                  )}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </Panel>
+      <SummaryView snap={r.snap} samples={r.samples} uptime={r.uptime} when={r.endedAt} />
+    </div>
+  );
+}
+
+function SummaryView({ snap, samples, uptime, when }: { snap: Snapshot; samples: DamageSample[]; uptime?: HuntRecord['uptime']; when?: number }) {
   const s = questSummary(snap);
-  let other = 0;
+  const colors = partyColors(s.party.members);
+  const top = topDamageKey(s.party.members);
   return (
     <Panel className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-8 py-6">
       <div className="flex items-baseline justify-between gap-4">
         <Eyebrow icon="check">{t.summary.title}</Eyebrow>
-        <span className="shrink-0 text-[15px] text-muted">{t.summary.time} <b className="text-2xl text-ink">{mmss(s.elapsed)}</b></span>
+        <span className="shrink-0 text-[15px] text-muted">{when != null && <span className="mr-4">{new Date(when).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' })}</span>}{t.summary.time} <b className="text-2xl text-ink">{mmss(s.elapsed)}</b></span>
       </div>
       <div className="flex flex-wrap gap-3">
         {s.monsters.map((m) => (
@@ -1067,7 +1187,7 @@ function SummaryView({ snap, samples, uptime }: { snap: Snapshot; samples: Damag
           })}
         </div>
       )}
-      {samples.length > 2 && <DpsChart samples={samples} height={110} />}
+      {samples.length > 2 && <PartyDpsChart samples={samples} members={s.party.members} colors={colors} />}
       {uptime && Object.keys(uptime).length > 0 && (
         <div className="flex flex-col gap-2">
           <span className="text-[13px] text-muted">{t.summary.uptime}</span>
@@ -1085,10 +1205,10 @@ function SummaryView({ snap, samples, uptime }: { snap: Snapshot; samples: Damag
       <div className="grid grid-cols-[minmax(0,1.4fr)_repeat(4,minmax(0,1fr))] gap-x-4 gap-y-2.5 text-[15px]">
         {[t.summary.hunter, t.summary.damage, 'DPS', t.crit, t.summary.weak].map((h) => <span key={h} className="text-[13px] text-muted">{h}</span>)}
         {s.party.members.map((m, i) => {
-          const color = m.self ? '#F2A541' : PARTY_COLORS[other++ % PARTY_COLORS.length];
+          const color = colors.get(memberKey(m))!;
           return [
             <span key={`n${i}`} className={cx('flex min-w-0 items-center gap-2 font-semibold', m.self && 'text-accent')}>
-              <span className="size-2.5 shrink-0 rounded-full" style={{ background: color }} /><span className="truncate">{m.name}</span>
+              <span className="size-2.5 shrink-0 rounded-full" style={{ background: color }} /><span className="truncate">{m.name}</span>{m === top && s.party.members.length > 1 && <Crown />}{m.npc && <span className="shrink-0 rounded border border-line px-1 text-[10px] leading-4 font-normal text-muted">NPC</span>}
             </span>,
             <span key={`d${i}`}>{fmtInt(m.damage)} <span className="text-muted">({m.pct}%)</span></span>,
             <span key={`p${i}`}>{m.dps.toFixed(1)}</span>,

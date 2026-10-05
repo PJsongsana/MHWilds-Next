@@ -2,9 +2,9 @@
 import { useSyncExternalStore } from 'react';
 
 export type PanelKey = 'now' | 'parts' | 'ailments' | 'buffs' | 'damage';
-export type Tab = 'hunt' | 'hunter';
+export type Tab = 'hunt' | 'hunter' | 'history';
 export interface Settings {
-  tab: Tab; // การล่า / นักล่า
+  tab: Tab; // การล่า / นักล่า / ประวัติ
   port: number;
   scale: number; // multiplies the auto-fit zoom
   sound: boolean;

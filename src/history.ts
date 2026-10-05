@@ -4,12 +4,12 @@ import { useSyncExternalStore } from 'react';
 import type { HuntRecord } from './logic';
 
 const KEY = 'hunt-dashboard-history';
-const MAX = 50;
+export const HISTORY_MAX = 20;
 
 function load(): HuntRecord[] {
   try {
     const v = JSON.parse(localStorage.getItem(KEY) ?? '[]');
-    return Array.isArray(v) ? v : [];
+    return Array.isArray(v) ? v.slice(0, HISTORY_MAX) : []; // older versions kept 50
   } catch {
     return [];
   }
@@ -19,7 +19,7 @@ let records = load();
 const listeners = new Set<() => void>();
 
 export function addHunt(r: HuntRecord) {
-  records = [r, ...records.filter((x) => x.id !== r.id)].slice(0, MAX);
+  records = [r, ...records.filter((x) => x.id !== r.id)].slice(0, HISTORY_MAX);
   try { localStorage.setItem(KEY, JSON.stringify(records)); } catch { /* storage full/private: keep in memory */ }
   listeners.forEach((f) => f());
 }

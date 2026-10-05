@@ -59,9 +59,16 @@ end
 local damage = {}      -- [hunter address] = { name, self, damage }
 local selfTarget       -- address of the monster the local player hit last
 
+-- Support hunters (NPCs that fill an SOS) have no player name: read their NPC name instead
+-- (Overlay data.lua GetHunterName: app.NpcUtil.getNpcName(NpcID) on the cNpcContextHolder).
+local GetNpcName = sdk.find_type_definition("app.NpcUtil"):get_method("getNpcName(app.NpcDef.ID)")
+local function isNpc(hunter) return hunter:get_HunterExtend():get_IsNpc() end
 local function hunterName(hunter)
     local ext = hunter:get_HunterExtend()
-    if ext:get_IsNpc() then return nil end
+    if ext:get_IsNpc() then
+        local name = try("npcName", function() return GetNpcName:call(nil, ext:get_field("_ContextHolder"):get_Npc().NpcID) end)
+        return type(name) == "string" and name ~= "" and name or nil -- anything else → caller uses "NPC"
+    end
     return ext:get_field("_ContextHolder"):get_Pl():get_PlayerName()
 end
 
@@ -106,7 +113,8 @@ end
 sdk.hook(sdk.find_type_definition("app.HunterCharacter"):get_method("evHit_AttackPostProcess(app.HitInfo)"),
 function(args)
     pcall(recordHit, sdk.to_managed_object(args[2]), sdk.to_managed_object(args[3]), function(hunter)
-        return { name = safe(hunterName, hunter) or "Hunter", self = hunter:get_IsMaster() }
+        local npc = safe(isNpc, hunter) == true
+        return { name = safe(hunterName, hunter) or (npc and "NPC" or "Hunter"), self = hunter:get_IsMaster(), npc = npc or nil }
     end)
 end)
 
@@ -449,8 +457,9 @@ function M.snapshot()
         weapon = try("weapon", function() return WeaponNames[Core.GetPlayerWeaponType()] end),
         vitals = readVitals(),
     }
-    for _, rec in pairs(damage) do
-        table.insert(snap.party, { name = rec.name, self = rec.self, palico = rec.palico, owner = rec.owner,
+    for key, rec in pairs(damage) do
+        -- id = the character's address: tells apart players with the same name ("Hunter")
+        table.insert(snap.party, { id = key, name = rec.name, self = rec.self, npc = rec.npc, palico = rec.palico, owner = rec.owner,
             damage = math.floor(rec.damage), hits = rec.hits, crits = rec.crits, weakHits = rec.weakHits })
     end
     local now = Core.GetTime()

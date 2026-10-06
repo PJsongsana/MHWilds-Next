@@ -204,7 +204,32 @@ export type Callout = (
   | { kind: 'part'; name: string; remain: number }
   | { kind: 'buff'; name: string; remainSec: number }
   | { kind: 'buildup'; id: string; pct: number }
+  | { kind: 'buffMissing'; id: string } // a watched buff group isn't running
 ) & { who?: string };
+
+/* ------------------------------ watched buffs ------------------------------ */
+
+// Buffs the user can ask to be reminded about. A group is satisfied by any of its item buffs
+// (ids from ITEM_BUFFS in lua/…/game_reader.lua), so "Demondrug" also counts the Mega one.
+export const WATCHABLE_BUFFS: Record<string, string[]> = {
+  demondrug: ['demondrug', 'mega_demondrug'],
+  armorskin: ['armorskin', 'mega_armorskin'],
+  might: ['might_seed', 'might_pill'],
+  adamant: ['adamant_seed', 'adamant_pill'],
+  demon_powder: ['demon_powder'],
+  hard_powder: ['hard_powder'],
+  hot_drink: ['hot_drink'],
+  cool_drink: ['cool_drink'],
+  dash_juice: ['dash_juice'],
+  immunizer: ['immunizer'],
+};
+export const BUFF_GRACE_SEC = 20; // no reminder in the first seconds of a quest: time to drink
+
+/** Watched groups with none of their buffs running (cooldown mantles don't count). */
+export function missingBuffs(buffs: Buff[], watch: string[]) {
+  const have = new Set(buffs.filter((b) => !b.cooldown && (b.remainSec == null || b.remainSec > 0)).map((b) => b.id));
+  return watch.filter((g) => WATCHABLE_BUFFS[g] && !WATCHABLE_BUFFS[g].some((id) => have.has(id)));
+}
 
 export const MAX_CALLOUTS = 4;
 const BUILDUP_HOT = 0.75;
@@ -213,7 +238,7 @@ const BUILDUP_HOT = 0.75;
  * Most urgent first: capture → monster disabled → enrage → parts about to break → buffs running out → buildup.
  * Capture / disabled / enrage are checked on every monster; within the same urgency the big-card monster comes first.
  */
-export function callouts(s: Snapshot, m: Monster | null): Callout[] {
+export function callouts(s: Snapshot, m: Monster | null, watch: string[] = []): Callout[] {
   const ranked: { rank: number; other: boolean; t: number; c: Callout }[] = [];
   const add = (rank: number, c: Callout, other = false, t = 0) => ranked.push({ rank, other, t, c });
 
@@ -230,6 +255,10 @@ export function callouts(s: Snapshot, m: Monster | null): Callout[] {
     partViews(m.parts).filter((p) => p.variant === 'near').forEach((p) => add(3, { kind: 'part', name: p.name, remain: p.remain }, false, p.remain));
     m.ailments.filter((a) => !a.active && a.buildup >= BUILDUP_HOT)
       .forEach((a) => add(5, { kind: 'buildup', id: a.id, pct: pct(a.buildup, 1) }));
+  }
+  // a buff the user wants running all the time is gone: just below enrage
+  if (s.quest?.active && s.quest.elapsedSec >= BUFF_GRACE_SEC) {
+    missingBuffs(s.player.buffs, watch).forEach((id) => add(2.5, { kind: 'buffMissing', id }));
   }
   buffViews(s.player.buffs).filter((b) => b.variant === 'warn')
     .forEach((b) => add(4, { kind: 'buff', name: b.name, remainSec: b.remainSec! }, false, b.remainSec!));
@@ -276,16 +305,48 @@ export const uptimeViews = (acc: Record<string, { name: string; sec: number }>, 
 export const keepMonsters = (prev: Snapshot | null, s: Snapshot): Snapshot =>
   s.monsters.length || !prev?.monsters.length ? s : { ...s, monsters: prev.monsters };
 
+/* ------------------------------ hunt timeline ------------------------------ */
+
+export type HuntEventKind = 'enrage' | 'ailment' | 'break' | 'capture' | 'slain' | 'captured' | 'buffOut';
+/** Something that happened during a quest, at quest time `t`. id = ailment id / buff group, name = part name, who = monster. */
+export interface HuntEvent { t: number; kind: HuntEventKind; id?: string; name?: string; who?: string }
+
+/** What changed between two snapshots of the same quest (monsters matched by id). */
+export function diffEvents(prev: Snapshot | null, next: Snapshot, t: number, watch: string[] = []): HuntEvent[] {
+  if (!prev?.quest?.active || !next.quest?.active) return [];
+  const out: HuntEvent[] = [];
+  for (const n of next.monsters) {
+    const p = prev.monsters.find((x) => x.id === n.id);
+    if (!p) continue;
+    const who = n.name;
+    if (n.enraged && !p.enraged) out.push({ t, kind: 'enrage', who });
+    for (const a of n.ailments) {
+      if (a.active && !p.ailments.find((x) => x.id === a.id)?.active) out.push({ t, kind: 'ailment', id: a.id, who });
+    }
+    for (const part of n.parts) {
+      const was = p.parts.find((x) => x.id === part.id);
+      if (part.broken && was && !was.broken) out.push({ t, kind: 'break', name: part.name, who });
+    }
+    if (hpState(n) === 'capture' && hpState(p) === 'normal') out.push({ t, kind: 'capture', who });
+    if (n.captured && !p.captured) out.push({ t, kind: 'captured', who });
+    else if (n.hp <= 0 && p.hp > 0 && !n.captured) out.push({ t, kind: 'slain', who });
+  }
+  const before = new Set(missingBuffs(prev.player.buffs, watch));
+  for (const id of missingBuffs(next.player.buffs, watch)) if (!before.has(id)) out.push({ t, kind: 'buffOut', id });
+  return out;
+}
+
 export interface HuntRecord {
   id: string;
   endedAt: number;
   snap: Snapshot; // trimmed to what the summary screen needs
   samples: DamageSample[];
   uptime: Record<string, { name: string; sec: number }>;
+  events?: HuntEvent[]; // missing in hunts saved before the timeline existed
 }
 
 /** Shrink a finished quest for storage: drop hitzones/scars, keep ≤300 chart points. */
-export function compactRecord(snap: Snapshot, samples: DamageSample[], uptime: HuntRecord['uptime'], endedAt: number): HuntRecord {
+export function compactRecord(snap: Snapshot, samples: DamageSample[], uptime: HuntRecord['uptime'], endedAt: number, events: HuntEvent[] = []): HuntRecord {
   const step = Math.max(1, Math.ceil(samples.length / 300));
   return {
     id: String(endedAt),
@@ -302,6 +363,7 @@ export function compactRecord(snap: Snapshot, samples: DamageSample[], uptime: H
     },
     samples: samples.filter((_, i) => i % step === 0 || i === samples.length - 1),
     uptime,
+    events: events.slice(0, 200), // ponytail: capped so one long quest stays small in storage
   };
 }
 

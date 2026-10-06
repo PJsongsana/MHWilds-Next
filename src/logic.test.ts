@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest';
 import {
   buffViews, callouts, elementRank, hpState, linkState, mmss, normalize, partViews, partyViews, pct, physTypeFor, pickMonster,
-  weakSpots, dpsSeries, questSummary, addUptime, uptimeViews, compactRecord, historyStats, keepMonsters, memberKey, rollingDps, type Hitzone, type Monster,
+  weakSpots, dpsSeries, questSummary, addUptime, uptimeViews, compactRecord, historyStats, keepMonsters, memberKey, rollingDps, diffEvents, missingBuffs, type Hitzone, type Monster,
 } from './logic';
 
 const hz = (name: string, slash: number, blow: number, shot: number, fire = 0, ice = 0): Hitzone =>
@@ -190,4 +190,31 @@ test('per-member DPS: same-name players stay apart, rolling window per series', 
   const b = rollingDps(samples, (s) => s.by?.b ?? 0, 10);
   expect(b.map((p) => p.v)).toEqual([0, 20, 20, 20]);
   expect(rollingDps(samples, (s) => s.by?.missing ?? 0).every((p) => p.v === 0)).toBe(true); // old recording / unknown key
+});
+
+test('watched buffs: a group counts any of its items; reminder waits 20s into the quest', () => {
+  expect(missingBuffs([{ id: 'mega_demondrug', name: 'x', remainSec: null }], ['demondrug', 'hot_drink'])).toEqual(['hot_drink']);
+  expect(missingBuffs([], ['nope'])).toEqual([]); // unknown group ignored
+  const s = (elapsedSec: number) => normalize({ connected: true, quest: { active: true, elapsedSec, limitSec: 3000 }, monsters: [], player: { buffs: [] } });
+  expect(callouts(s(10), null, ['hot_drink'])).toEqual([]);
+  expect(callouts(s(30), null, ['hot_drink'])).toEqual([{ kind: 'buffMissing', id: 'hot_drink' }]);
+  expect(callouts(s(30), null)).toEqual([]); // nothing watched
+});
+
+test('timeline: enrage, ailment, break, capture line, slain, captured, buff ran out', () => {
+  const mon = (o = {}) => ({ id: 'm', name: 'X', hp: 500, hpMax: 1000, enraged: false, parts: [{ id: 'p', name: 'หัว', kind: 'x', hp: 1, hpMax: 9, broken: false }],
+    ailments: [{ id: 'paralysis', buildup: 0.5, procs: 0 }], ...o });
+  const snap = (m: object, buffs: object[] = [{ id: 'hot_drink', name: 'Hot', remainSec: 10 }]) =>
+    normalize({ connected: true, quest: { active: true, elapsedSec: 0, limitSec: 0 }, monsters: [m], player: { buffs } });
+  const a = snap(mon());
+  const b = snap(mon({ enraged: true, ailments: [{ id: 'paralysis', buildup: 1, procs: 1, active: true }],
+    parts: [{ id: 'p', name: 'หัว', kind: 'x', hp: 0, hpMax: 9, broken: true }] }), []);
+  expect(diffEvents(a, b, 42, ['hot_drink']).map((e) => [e.kind, e.id ?? e.name ?? ''])).toEqual(
+    [['enrage', ''], ['ailment', 'paralysis'], ['break', 'หัว'], ['buffOut', 'hot_drink']]);
+  expect(diffEvents(a, b, 42)[0]).toMatchObject({ t: 42, who: 'X' });
+  expect(diffEvents(a, snap(mon({ hp: 100 })), 1).map((e) => e.kind)).toEqual(['capture']);
+  expect(diffEvents(a, snap(mon({ hp: 0 })), 1).map((e) => e.kind)).toEqual(['slain']);
+  expect(diffEvents(a, snap(mon({ hp: 100, captured: true })), 1).map((e) => e.kind)).toEqual(['captured']); // captured = done, so no 'capturable' event on the same tick
+  expect(diffEvents(null, b, 1)).toEqual([]);
+  expect(diffEvents(b, b, 2)).toEqual([]); // nothing new
 });

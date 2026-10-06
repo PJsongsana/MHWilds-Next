@@ -2,16 +2,16 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import { Icon, iconFor, type IconName } from './icons';
 import {
   buffViews, callouts, dpsSeries, historyStats, elementRank, fmtInt, hpState, mmss, partViews, partyViews, pct, physTypeFor, physValue,
-  pickMonster, questSummary, ratio, uptimeViews, weakSpots, WEAK_HITZONE, memberKey, rollingDps,
+  pickMonster, questSummary, ratio, uptimeViews, weakSpots, WEAK_HITZONE, memberKey, rollingDps, WATCHABLE_BUFFS,
   type Ailment, type Callout, type DamageSample, type Hitzone, type Link, type Monster, type PartView, type PhysType, type Scar,
-  type HuntRecord, type Member, type Profile, type Snapshot, type Vitals,
+  type HuntEvent, type HuntRecord, type Member, type Profile, type Snapshot, type Vitals,
 } from './logic';
 import { mocks } from './mocks';
 import DISCORD_TEXT from '../electron/presence-text.json'; // the default wording, shared with the desktop app
 import CHANGELOG from '../CHANGELOG.md?raw';
 import { version as APP_VERSION } from '../package.json';
 import { HISTORY_MAX, useHistory } from './history';
-import { DEFAULT_SETTINGS, setSettings, useSettings, type PanelKey, type Tab } from './settings';
+import { DEFAULT_SETTINGS, setSettings, useSettings, type PanelKey, type SoundMode, type Tab } from './settings';
 import { t } from './strings';
 import { mockName, useHunt } from './useHunt';
 
@@ -54,6 +54,8 @@ const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).jo
 
 // Present only inside the desktop app (electron/preload.cjs).
 // SetupStatus = bridge/setup.js ensureSetup(): checks REFramework/_CatLib, installs our Lua.
+// electron/update.mjs: newest release on GitHub vs this version
+interface UpdateStatus { latest?: string; url: string; newer: boolean; error?: boolean; checkedAt: number }
 // What the Discord presence currently shows (electron/discord.mjs)
 interface DiscordStatus { state: 'off' | 'connecting' | 'live' | 'error'; details?: string | null; line2?: string | null }
 interface SetupStatus { gameDir: string | null; reframework: boolean; catlib: boolean; lua: 'current' | 'updated' | 'skipped' | 'error'; error?: string }
@@ -62,6 +64,7 @@ declare global {
     huntApp?: {
       setDiscord(cfg: { enabled: boolean; clientId: string; text: Record<string, string>; port: number }): void;
       getSetup(): Promise<SetupStatus>;
+      checkUpdate(version: string): Promise<UpdateStatus>;
       getDiscordStatus(): Promise<DiscordStatus>;
       onDiscordStatus(cb: (st: DiscordStatus) => void): () => void;
     };
@@ -98,7 +101,8 @@ export default function App() {
   const discord = useDiscordStatus();
   const inQuest = !!snap?.connected && !!snap.quest?.active;
   const { monster } = snap ? pickMonster(snap) : { monster: null };
-  useAlertSound(inQuest && snap ? callouts(snap, monster) : [], settings.sound);
+  useAlertSound(inQuest && snap ? callouts(snap, monster, settings.watchBuffs) : [], settings.sound, settings.voice);
+  const update = useUpdate(settings.checkUpdates);
   useEffect(() => { window.huntApp?.setDiscord({ ...settings.discord, port: settings.port }); }, [settings.discord, settings.port]);
 
   // S opens settings, Esc closes, 1/2 switch tabs (spec §10: keyboard usable, nothing needed while playing)
@@ -118,6 +122,7 @@ export default function App() {
       <div style={{ zoom, width: w, height: h }} className="flex flex-col gap-4 px-6 py-5 tabular-nums">
         <Header snap={snap} link={link} tab={settings.tab} discord={discord} onSettings={() => setShowSettings(true)} />
         <SetupNotice {...setup} />
+        <UpdateNotice {...update} />
         {settings.tab === 'history' ? (
           <HistoryTab layout={layout} />
         ) : settings.tab === 'hunter' ? (
@@ -134,7 +139,7 @@ export default function App() {
           </div>
         )}
       </div>
-      {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} setup={setup} discord={discord} />}
+      {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} setup={setup} discord={discord} update={update} />}
       {mockName && <MockSwitcher />}
     </div>
   );
@@ -196,6 +201,42 @@ function SetupList({ status: st, compact }: { status: SetupStatus; compact?: boo
   );
 }
 
+/* --------------------------------- update ---------------------------------- */
+
+// Desktop app: is there a newer release? On start and every 6 hours (when enabled), or from the button in settings.
+function useUpdate(enabled: boolean) {
+  const [st, setSt] = useState<UpdateStatus | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const check = () => {
+    const app = window.huntApp;
+    if (!app?.checkUpdate) return;
+    setChecking(true);
+    app.checkUpdate(APP_VERSION).then(setSt).catch(() => {}).finally(() => setChecking(false));
+  };
+  useEffect(() => {
+    if (!enabled) return;
+    check();
+    const id = setInterval(check, 6 * 3600e3);
+    return () => clearInterval(id);
+  }, [enabled]);
+  return { st, checking, check, dismissed, dismiss: () => setDismissed(st?.latest ?? null) };
+}
+type Update = ReturnType<typeof useUpdate>;
+
+function UpdateNotice({ st, dismissed, dismiss }: Update) {
+  if (!st?.newer || !st.latest || dismissed === st.latest) return null;
+  return (
+    <div role="status" className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-gold/50 bg-[#241C12] px-5 py-2.5 text-[15px]">
+      <Icon name="star" size={20} className="text-gold-hi" />
+      <span className="min-w-0 flex-1">{t.update.available(st.latest, APP_VERSION)}</span>
+      <a href={st.url} target="_blank" rel="noreferrer"
+        className="rounded-lg border border-gold px-3 py-1.5 text-sm font-semibold text-gold-hi no-underline hover:bg-gold/15">{t.update.download}</a>
+      <button type="button" onClick={dismiss} className="text-sm text-muted underline hover:text-ink">{t.update.later}</button>
+    </div>
+  );
+}
+
 /* --------------------------------- discord ---------------------------------- */
 
 function useDiscordStatus() {
@@ -246,15 +287,59 @@ export function beep(freqs: number[]) {
     o.stop(at + 0.25);
   });
 }
-const TONES: Partial<Record<Callout['kind'], number[]>> = { capture: [880, 1175], ailment: [660, 880], enrage: [440, 330] };
+const TONES: Partial<Record<Callout['kind'], number[]>> = { capture: [880, 1175], ailment: [660, 880], enrage: [440, 330], buffMissing: [520, 390] };
 
-function useAlertSound(items: Callout[], on: boolean) {
+// The sentence spoken for an alert in voice mode.
+function sayFor(c: Callout): string {
+  switch (c.kind) {
+    case 'capture': return c.who ? `${c.who} ${t.say.capture}` : t.say.capture;
+    case 'ailment': return `${c.who ? c.who + ' ' : ''}${t.ailment[c.id] ?? c.id}`;
+    case 'enrage': return t.say.enrage(c.who);
+    case 'buffMissing': return t.say.buffMissing(t.buffGroup[c.id] ?? c.id);
+    default: return '';
+  }
+}
+
+const isThai = (v: SpeechSynthesisVoice) => v.lang.toLowerCase().startsWith('th');
+
+/** Thai voices on this machine (Chromium fills the list a moment after load). */
+function useThaiVoices() {
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  useEffect(() => {
+    const synth = window.speechSynthesis;
+    if (!synth) return;
+    const load = () => setVoices(synth.getVoices().filter(isThai));
+    load();
+    synth.addEventListener('voiceschanged', load);
+    return () => synth.removeEventListener('voiceschanged', load);
+  }, []);
+  return voices;
+}
+
+/** Speak with the chosen (else first) Thai voice; false when this machine has none. */
+function speak(text: string, voice: { name: string; rate: number }) {
+  const synth = window.speechSynthesis;
+  const thai = synth?.getVoices().filter(isThai) ?? [];
+  const v = thai.find((x) => x.name === voice.name) ?? thai[0];
+  if (!v || !text) return false;
+  synth.cancel(); // the newest alert wins
+  const u = new SpeechSynthesisUtterance(text);
+  u.voice = v; u.lang = v.lang; u.rate = voice.rate;
+  synth.speak(u);
+  return true;
+}
+
+// Fires once when an alert *appears* (not every frame while it lasts).
+function useAlertSound(items: Callout[], mode: SoundMode, voice: { name: string; rate: number }) {
   const seen = useRef(new Set<string>());
   useEffect(() => {
-    const keys = new Set(items.filter((c) => TONES[c.kind]).map((c) => `${c.kind}:${'id' in c ? c.id : ''}:${c.who ?? ''}`));
-    const fresh = [...keys].find((k) => !seen.current.has(k));
-    seen.current = keys;
-    if (on && fresh) beep(TONES[fresh.split(':')[0] as Callout['kind']]!);
+    const keyOf = (c: Callout) => `${c.kind}:${'id' in c ? c.id : ''}:${c.who ?? ''}`;
+    const alertable = items.filter((c) => TONES[c.kind]);
+    const fresh = alertable.find((c) => !seen.current.has(keyOf(c)));
+    seen.current = new Set(alertable.map(keyOf));
+    if (!fresh || mode === 'off') return;
+    if (mode === 'voice' && speak(sayFor(fresh), voice)) return;
+    beep(TONES[fresh.kind]!); // beep mode, or no Thai voice installed
   });
 }
 
@@ -267,7 +352,7 @@ function useAlertSound(items: Callout[], on: boolean) {
  * when only one is still alive it goes back to the full single-monster layout.
  */
 function Dashboard({ snap, layout, samples }: { snap: Snapshot; layout: Layout; samples: DamageSample[] }) {
-  const { panels } = useSettings();
+  const { panels, watchBuffs } = useSettings();
   const phys = physTypeFor(snap.player.weapon);
   const all = snap.monsters.slice(0, 3);
   const alive = all.filter((m) => hpState(m) !== 'done');
@@ -276,7 +361,7 @@ function Dashboard({ snap, layout, samples }: { snap: Snapshot; layout: Layout; 
   const monster = shown.find((m) => m.id === pickMonster(snap).monster?.id) ?? shown[0] ?? null;
   const multi = shown.length > 1;
   const done = finished.length > 0 && <DoneRow monsters={finished} />;
-  const now = panels.now && <NowPanel items={callouts(snap, monster)} cols={layout === 'portrait' ? 2 : 4} done={done} />;
+  const now = panels.now && <NowPanel items={callouts(snap, monster, watchBuffs)} cols={layout === 'portrait' ? 2 : 4} done={done} />;
 
   if (layout === 'portrait') {
     return (
@@ -754,6 +839,10 @@ function CalloutTile({ c }: { c: Callout }) {
       [title, detail] = t.now.buff(c.name); icon = 'flask'; time = c.remainSec;
       className = 'bg-accent-warn border-accent-line text-accent';
       break;
+    case 'buffMissing':
+      [title, detail] = t.now.buffMissing(t.buffGroup[c.id] ?? c.id); icon = 'flask';
+      className = 'animate-enrage-in bg-danger-bg border-danger text-danger-ink';
+      break;
     case 'buildup': {
       const [color, bg] = ailColors(c.id);
       [title, detail] = t.now.buildup(t.ailment[c.id] ?? c.id, c.pct); icon = iconFor(c.id, 'star');
@@ -1015,7 +1104,30 @@ function DpsChart({ samples, height, fill }: { samples: DamageSample[]; height: 
 
 // Summary chart: one DPS line per member (same colors as the table) over the team area; chips toggle each line.
 // Recordings made before per-member samples existed only have team + us.
-function PartyDpsChart({ samples, members, colors }: { samples: DamageSample[]; members: Member[]; colors: Map<string, string> }) {
+// Timeline markers: one icon + color per kind (ailments use their own icon/color).
+function eventStyle(e: HuntEvent): { icon: IconName; color: string } {
+  switch (e.kind) {
+    case 'enrage': return { icon: 'flame', color: '#F07F5F' };
+    case 'ailment': return { icon: iconFor(e.id ?? '', 'star'), color: ailColors(e.id ?? '')[0] };
+    case 'break': return { icon: 'hammer', color: '#C8A96A' };
+    case 'capture': return { icon: 'target', color: '#F2A541' };
+    case 'buffOut': return { icon: 'flask', color: '#E6C84A' };
+    default: return { icon: 'check', color: '#8FD3A8' }; // slain / captured
+  }
+}
+function eventLabel(e: HuntEvent, withWho: boolean) {
+  const what = e.kind === 'ailment' ? t.ailment[e.id ?? ''] ?? e.id
+    : e.kind === 'break' ? t.events.break(e.name ?? '')
+    : e.kind === 'buffOut' ? t.events.buffOut(t.buffGroup[e.id ?? ''] ?? e.id ?? '')
+    : t.events[e.kind];
+  return withWho && e.who ? `${what} (${e.who})` : what;
+}
+
+function PartyDpsChart({ samples, members, colors, events = [] }: { samples: DamageSample[]; members: Member[]; colors: Map<string, string>; events?: HuntEvent[] }) {
+  const [showEvents, setShowEvents] = useState(true);
+  const withWho = new Set(events.map((e) => e.who).filter(Boolean)).size > 1; // name the monster only when there were several
+  const counts = (['enrage', 'ailment', 'break', 'buffOut'] as const)
+    .map((k) => [k, events.filter((e) => e.kind === k).length] as const).filter(([, n]) => n > 0);
   const perMember = samples.some((s) => s.by);
   const [hidden, setHidden] = useState<Set<string>>(new Set());
   const [team, setTeam] = useState(!perMember); // with per-member lines the team total would squash them at the bottom
@@ -1046,19 +1158,44 @@ function PartyDpsChart({ samples, members, colors }: { samples: DamageSample[]; 
             </button>
           );
         })}
+        {events.length > 0 && (
+          <button type="button" onClick={() => setShowEvents(!showEvents)} aria-pressed={showEvents} className={chip(showEvents)}>
+            <Icon name="flame" size={12} className="text-[#F07F5F]" />{t.events.chip}
+          </button>
+        )}
         {perMember && <>
           <button type="button" onClick={() => { setHidden(new Set()); setTeam(true); }} className="ml-1 text-xs text-muted underline hover:text-ink">{t.chart.all}</button>
           <button type="button" onClick={() => { setHidden(new Set(members.filter((m) => !m.self).map(memberKey))); setTeam(false); }}
             className="text-xs text-muted underline hover:text-ink">{t.chart.onlyMe}</button>
         </>}
       </div>
+      {/* icons sit in a row above the plot (HTML, so they don't stretch with the SVG); hover = time + what */}
+      {showEvents && events.length > 0 && (
+        <div className="relative h-6">
+          {events.map((e, i) => {
+            const st = eventStyle(e);
+            return (
+              <span key={i} title={`${mmss(e.t)} · ${eventLabel(e, withWho)}`}
+                className="absolute top-0 flex size-6 -translate-x-1/2 items-center justify-center rounded-full border bg-surface"
+                style={{ left: `${Math.min(100, Math.max(0, (e.t / tMax) * 100))}%`, color: st.color, borderColor: `${st.color}66` }}>
+                <Icon name={st.icon} size={13} stroke={2.2} />
+              </span>
+            );
+          })}
+        </div>
+      )}
       <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="h-[150px] w-full" aria-label={t.dpsChart}>
         {[0.25, 0.5, 0.75].map((f) => <line key={f} x1="0" x2={W} y1={H * f} y2={H * f} stroke="#3A2E1F" strokeWidth="1" vectorEffect="non-scaling-stroke" />)}
+        {showEvents && events.map((e, i) => {
+          const x = Math.min(W, (e.t / tMax) * W);
+          return <line key={`e${i}`} x1={x} x2={x} y1="0" y2={H} stroke={eventStyle(e).color} strokeOpacity="0.35" strokeDasharray="3 4" vectorEffect="non-scaling-stroke" />;
+        })}
         {team && <path d={`${path(teamPts)} L${W},${H} L0,${H} Z`} fill="rgb(90 169 230 / 0.14)" />}
         {series.map((s) => (
           <path key={s.key} d={path(s.pts)} fill="none" stroke={s.color} strokeWidth={s.self ? 2.2 : 1.5} vectorEffect="non-scaling-stroke" strokeLinejoin="round" />
         ))}
       </svg>
+      {counts.length > 0 && <span className="text-xs text-muted">{counts.map(([k, n]) => `${t.events.count[k]} ${n}`).join(' · ')}</span>}
       {!perMember && <span className="text-xs text-muted">{t.chart.oldRecord}</span>}
     </div>
   );
@@ -1067,13 +1204,14 @@ function PartyDpsChart({ samples, members, colors }: { samples: DamageSample[]; 
 /* ------------------------------ post-quest summary ------------------------------ */
 
 // Out of a quest: the latest hunt's summary, with a way into the full history tab.
-function HistoryView({ latest }: { latest: { snap: Snapshot; samples: DamageSample[]; uptime: HuntRecord['uptime'] } | null }) {
+function HistoryView({ latest }: { latest: { snap: Snapshot; samples: DamageSample[]; uptime: HuntRecord['uptime']; events: HuntEvent[] } | null }) {
   const records = useHistory();
   const r = records[0];
   if (!r && !latest) return <Center icon="target" title={t.notInQuest} />;
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-      {r ? <SummaryView snap={r.snap} samples={r.samples} uptime={r.uptime} /> : <SummaryView snap={latest!.snap} samples={latest!.samples} uptime={latest!.uptime} />}
+      {r ? <SummaryView snap={r.snap} samples={r.samples} uptime={r.uptime} events={r.events} />
+        : <SummaryView snap={latest!.snap} samples={latest!.samples} uptime={latest!.uptime} events={latest!.events} />}
       {records.length > 1 && (
         <button type="button" onClick={() => setSettings({ tab: 'history' })}
           className="self-end rounded-lg border border-line px-4 py-2 text-sm text-ink-2 hover:border-gold hover:text-gold-hi focus-visible:outline-2 focus-visible:outline-gold">
@@ -1152,12 +1290,12 @@ function HistoryTab({ layout }: { layout: Layout }) {
           })}
         </div>
       </Panel>
-      <SummaryView snap={r.snap} samples={r.samples} uptime={r.uptime} when={r.endedAt} />
+      <SummaryView snap={r.snap} samples={r.samples} uptime={r.uptime} when={r.endedAt} events={r.events} />
     </div>
   );
 }
 
-function SummaryView({ snap, samples, uptime, when }: { snap: Snapshot; samples: DamageSample[]; uptime?: HuntRecord['uptime']; when?: number }) {
+function SummaryView({ snap, samples, uptime, when, events }: { snap: Snapshot; samples: DamageSample[]; uptime?: HuntRecord['uptime']; when?: number; events?: HuntEvent[] }) {
   const s = questSummary(snap);
   const colors = partyColors(s.party.members);
   const top = topDamageKey(s.party.members);
@@ -1187,7 +1325,7 @@ function SummaryView({ snap, samples, uptime, when }: { snap: Snapshot; samples:
           })}
         </div>
       )}
-      {samples.length > 2 && <PartyDpsChart samples={samples} members={s.party.members} colors={colors} />}
+      {samples.length > 2 && <PartyDpsChart samples={samples} members={s.party.members} colors={colors} events={events} />}
       {uptime && Object.keys(uptime).length > 0 && (
         <div className="flex flex-col gap-2">
           <span className="text-[13px] text-muted">{t.summary.uptime}</span>
@@ -1361,8 +1499,10 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
 const inputCls = 'rounded-lg border border-line bg-surface-2 px-3 py-1.5 focus-visible:border-gold focus-visible:outline-none';
 
 // Opened with the gear button or S (Esc closes). Sections on the left; every control is a native input.
-function SettingsDialog({ onClose, setup, discord }: { onClose: () => void; setup: Setup; discord: DiscordStatus }) {
+function SettingsDialog({ onClose, setup, discord, update }: { onClose: () => void; setup: Setup; discord: DiscordStatus; update: Update }) {
   const s = useSettings();
+  const voices = useThaiVoices();
+  const testSound = () => { if (s.sound === 'voice' && speak(t.say.test, s.voice)) return; beep(TONES.capture!); };
   const app = !!window.huntApp; // Discord + install status only exist in the desktop app
   const sections: Section[] = ['general', ...(app ? (['discord', 'setup'] as const) : []), 'about'];
   const [sec, setSec] = useState<Section>('general');
@@ -1403,9 +1543,45 @@ function SettingsDialog({ onClose, setup, discord }: { onClose: () => void; setu
                     <input type="range" min={0.7} max={1.5} step={0.05} value={s.scale} aria-label={t.settings.scale}
                       onChange={(e) => setSettings({ scale: Number(e.target.value) })} className="w-48 accent-gold" />
                   </Row>
-                  <Row label={t.settings.sound}>
-                    <Switch label={t.settings.sound} checked={s.sound} onChange={(v) => { setSettings({ sound: v }); if (v) beep(TONES.capture!); }} />
+                  <Row label={t.settings.sound} hint={s.sound === 'voice' && voices.length === 0 ? t.settings.noThaiVoice : undefined}>
+                    <div role="radiogroup" aria-label={t.settings.sound} className="flex shrink-0 rounded-lg border border-line p-0.5">
+                      {(['off', 'beep', 'voice'] as const).map((m) => (
+                        <button key={m} type="button" role="radio" aria-checked={s.sound === m}
+                          onClick={() => { setSettings({ sound: m }); if (m === 'beep') beep(TONES.capture!); if (m === 'voice') speak(t.say.test, s.voice); }}
+                          className={cx('rounded-md px-3 py-1 text-sm focus-visible:outline-2 focus-visible:outline-gold',
+                            s.sound === m ? 'bg-gold/70 font-semibold text-on-accent' : 'text-ink-2 hover:text-ink')}>
+                          {t.settings.soundMode[m]}
+                        </button>
+                      ))}
+                    </div>
                   </Row>
+                  {s.sound === 'voice' && voices.length > 0 && <>
+                    <Row label={t.settings.voice}>
+                      <select value={s.voice.name} aria-label={t.settings.voice} onChange={(e) => setSettings({ voice: { ...s.voice, name: e.target.value } })}
+                        className={cx(inputCls, 'max-w-60')}>
+                        {voices.map((v) => <option key={v.name} value={v.name}>{v.name}</option>)}
+                      </select>
+                    </Row>
+                    <Row label={t.settings.voiceRate} hint={`${s.voice.rate.toFixed(1)}×`}>
+                      <input type="range" min={0.7} max={1.6} step={0.1} value={s.voice.rate} aria-label={t.settings.voiceRate}
+                        onChange={(e) => setSettings({ voice: { ...s.voice, rate: Number(e.target.value) } })} className="w-48 accent-gold" />
+                    </Row>
+                  </>}
+                  {s.sound !== 'off' && (
+                    <Row label={t.settings.soundTest}>
+                      <button type="button" onClick={testSound}
+                        className="rounded-lg border border-line px-3 py-1.5 text-sm hover:border-gold focus-visible:outline-2 focus-visible:outline-gold">▶ {t.settings.soundTest}</button>
+                    </Row>
+                  )}
+                </Group>
+                <Group title={t.settings.watchBuffs}>
+                  <p className="py-2 text-xs text-muted">{t.settings.watchHint}</p>
+                  {Object.keys(WATCHABLE_BUFFS).map((g) => (
+                    <Row key={g} label={t.buffGroup[g] ?? g}>
+                      <Switch label={t.buffGroup[g] ?? g} checked={s.watchBuffs.includes(g)}
+                        onChange={(v) => setSettings({ watchBuffs: v ? [...s.watchBuffs, g] : s.watchBuffs.filter((x) => x !== g) })} />
+                    </Row>
+                  ))}
                 </Group>
                 <Group title={t.settings.panels}>
                   {PANEL_KEYS.map((k) => (
@@ -1484,6 +1660,21 @@ function SettingsDialog({ onClose, setup, discord }: { onClose: () => void; setu
                   </div>
                   <a href={REPO_URL} target="_blank" rel="noreferrer" className="ml-auto text-sm text-gold-hi underline">{t.settings.source}</a>
                 </div>
+                {app && (
+                  <Group title={t.update.title}>
+                    <Row label={t.update.auto}>
+                      <Switch label={t.update.auto} checked={s.checkUpdates} onChange={(v) => setSettings({ checkUpdates: v })} />
+                    </Row>
+                    <Row label={update.checking ? t.update.checking : !update.st ? t.update.never : update.st.error ? t.update.failed
+                      : update.st.newer ? t.update.available(update.st.latest!, APP_VERSION) : t.update.upToDate(update.st.latest ?? APP_VERSION)}>
+                      <div className="flex shrink-0 items-center gap-3">
+                        {update.st?.newer && <a href={update.st.url} target="_blank" rel="noreferrer" className="text-sm font-semibold text-gold-hi underline">{t.update.download}</a>}
+                        <button type="button" onClick={update.check} disabled={update.checking}
+                          className="rounded-lg border border-line px-3 py-1.5 text-sm hover:border-gold disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-gold">{t.update.checkNow}</button>
+                      </div>
+                    </Row>
+                  </Group>
+                )}
                 <Changelog text={CHANGELOG} />
               </div>
             )}

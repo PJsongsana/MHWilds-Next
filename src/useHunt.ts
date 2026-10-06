@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { addHunt } from './history';
-import { addUptime, compactRecord, keepMonsters, memberKey, linkState, normalize, type DamageSample, type HuntRecord, type Link, type Snapshot } from './logic';
+import { addUptime, compactRecord, diffEvents, keepMonsters, memberKey, type HuntEvent, linkState, normalize, type DamageSample, type HuntRecord, type Link, type Snapshot } from './logic';
 import { mocks } from './mocks';
 import { useSettings } from './settings';
 
@@ -15,7 +15,8 @@ export interface HuntState {
   snap: Snapshot | null;
   link: Link;
   samples: DamageSample[];                               // cumulative damage over the current quest (DPS chart)
-  summary: { snap: Snapshot; samples: DamageSample[]; uptime: HuntRecord['uptime'] } | null; // last finished quest, until the next one starts
+  // last finished quest, until the next one starts
+  summary: { snap: Snapshot; samples: DamageSample[]; uptime: HuntRecord['uptime']; events: HuntEvent[] } | null;
 }
 
 const partyTotals = (s: Snapshot) => ({
@@ -26,7 +27,9 @@ const partyTotals = (s: Snapshot) => ({
 
 /** Live snapshot from the bridge (reconnects every 2s), or a mock with ?mock=<name>. */
 export function useHunt(): HuntState {
-  const { port: settingsPort } = useSettings();
+  const { port: settingsPort, watchBuffs } = useSettings();
+  const watch = useRef(watchBuffs); // read inside the socket handler, which outlives renders
+  watch.current = watchBuffs;
   const port = portOverride ?? String(settingsPort);
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [open, setOpen] = useState(false);
@@ -35,6 +38,8 @@ export function useHunt(): HuntState {
   const samples = useRef<DamageSample[]>([]);
   const lastActive = useRef<Snapshot | null>(null);
   const uptime = useRef<HuntRecord['uptime']>({});
+  const events = useRef<HuntEvent[]>([]); // timeline for the summary chart
+  const prevRaw = useRef<Snapshot | null>(null); // last in-quest snapshot as received (events compare against it)
 
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 500); // drives stale detection
@@ -74,8 +79,12 @@ export function useHunt(): HuntState {
       if (!lastActive.current || (last && t < last.t - 1)) { // a new quest started
         samples.current = [];
         uptime.current = {};
+        events.current = [];
+        prevRaw.current = null;
         setSummary(null);
       }
+      events.current.push(...diffEvents(prevRaw.current, s, t, watch.current));
+      prevRaw.current = s;
       const prev = samples.current.at(-1);
       if (!prev || t - prev.t >= SAMPLE_EVERY_SEC) {
         if (prev) addUptime(uptime.current, s.player.buffs, t - prev.t);
@@ -83,9 +92,10 @@ export function useHunt(): HuntState {
       }
       lastActive.current = keepMonsters(lastActive.current, s);
     } else if (lastActive.current) {
-      setSummary({ snap: lastActive.current, samples: samples.current, uptime: uptime.current });
-      addHunt(compactRecord(lastActive.current, samples.current, uptime.current, Date.now()));
+      setSummary({ snap: lastActive.current, samples: samples.current, uptime: uptime.current, events: events.current });
+      addHunt(compactRecord(lastActive.current, samples.current, uptime.current, Date.now(), events.current));
       lastActive.current = null;
+      prevRaw.current = null;
     }
   }
 
@@ -96,7 +106,7 @@ export function useHunt(): HuntState {
     const fake = mockSamples(s);
     if (mockName === 'summary') {
       const idle = { ...s, quest: { active: false, elapsedSec: 0, limitSec: 0 }, monsters: [] };
-      return { snap: idle, link: 'live', samples: [], summary: { snap: s, samples: fake, uptime: mockUptime(s) } };
+      return { snap: idle, link: 'live', samples: [], summary: { snap: s, samples: fake, uptime: mockUptime(s), events: mockEvents(s) } };
     }
     return { snap: s, link: linkState(s, true, now), samples: fake, summary: null };
   }
@@ -120,4 +130,15 @@ function mockSamples(s: Snapshot): DamageSample[] {
 function mockUptime(s: Snapshot): HuntRecord['uptime'] {
   const e = s.quest?.elapsedSec ?? 0;
   return Object.fromEntries(s.player.buffs.map((b, i) => [b.id, { name: b.name, sec: e * [1, 0.62, 0.48, 0.9, 0.3][i % 5] }]));
+}
+
+// A plausible timeline for the mock summary.
+function mockEvents(s: Snapshot): HuntEvent[] {
+  const e = s.quest?.elapsedSec ?? 600, who = s.monsters[0]?.name;
+  return [
+    { t: e * 0.12, kind: 'ailment', id: 'poison', who }, { t: e * 0.3, kind: 'enrage', who },
+    { t: e * 0.42, kind: 'break', name: 'ปีกซ้าย', who }, { t: e * 0.55, kind: 'ailment', id: 'paralysis', who },
+    { t: e * 0.63, kind: 'buffOut', id: 'demondrug' }, { t: e * 0.7, kind: 'enrage', who },
+    { t: e * 0.82, kind: 'break', name: 'หาง', who }, { t: e * 0.9, kind: 'capture', who },
+  ];
 }
